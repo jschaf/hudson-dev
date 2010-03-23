@@ -1,9 +1,13 @@
 import Text.ParserCombinators.Parsec
-import Control.Applicative hiding (many, (<|>))
+import Text.ParserCombinators.Parsec.Token (LanguageDef, TokenParser, lexeme)
+import qualified Text.ParserCombinators.Parsec.Token as T
 import Control.Monad
-import Data.Maybe
 
-data HDecl = HDecl HFunc
+-- TODO: Maybe remove the extra level of indirection with HDeclFunc.
+-- The problem is then the parsers aren't type safe but I'm not sure
+-- if that's important.
+data HDecl = HDeclFunc HFunc
+           | HDeclWrite HWrite
            deriving (Show)
 
 data HFunc = HFunc {name :: HId,
@@ -11,40 +15,85 @@ data HFunc = HFunc {name :: HId,
                     code :: [HDecl]}
            deriving (Show)
 
+data HWrite = HWrite Integer
+            deriving (Show)
+
 type HId = String
-type HObject = String
-type HParams = [HId]            -- Optional types
+type HParams = [HId]
 
--- Not really sure why this works, but Wikipedia said it was good.
-instance Applicative (GenParser tok st) where
-    pure  = return
-    (<*>) = ap
+-- Ideas
+-- 1. Have a separate lex phase to resolve continuation comments
 
-p_func :: CharParser () HFunc
-p_func = do spaces
-            string "function"
-            spaces
-            n <- p_id
-            spaces
-            ps <- p_params
-            spaces
-            string "is"
-            spaces
-            c <- p_code
-            return HFunc {name = n, params = ps, code = c}
+parseDecl :: CharParser () HDecl
+parseDecl = do liftM HDeclFunc parseFunc
+           <|> liftM HDeclWrite parseWrite
+           <?> "declaration"
 
-p_id :: CharParser () HId
-p_id = liftM2 (:) (char '.' <|> letter) (many alphaNum)
+parseFunc :: CharParser () HFunc
+parseFunc = do reserved "function"
+               n <- identifier
+               ps <- parseParams
+               reserved "is"
+               c <- parseCode 0
+               return HFunc {name = n, params = ps, code = c}
 
-p_code = return []
+parseWrite :: CharParser () HWrite
+parseWrite = do reserved "write"
+                n <- parens integer
+                return $ HWrite n
 
-p_params = p_series '(' p_id ')'
+parseCode :: Int -> CharParser () [HDecl]
+parseCode n = do 
+                 optional eof
+                 m <- liftM sourceColumn getPosition
+                 
+                 if m > n then
+                     do d <- parseDecl
+                        ds <- parseCode n
+                        return (d:ds)
+                  else return []
 
-p_series :: Char -> CharParser () a -> Char -> CharParser () [a]
-p_series left p right =
-    between (char left <* spaces) (char right) $
-                (p <* spaces) `sepBy` (char ',' <* spaces)
+parseParams = parens (commaSep identifier)
 
-ts = "function blah  (one, two) is"
+hudFunc = "function blah(one, two) is\n  write(1) "
+hudWrite = "write(12)"
 
-p a b = parse a "hudson" b
+test = parse parseDecl "hudson"
+t = test hudFunc
+
+-- Tokenizing Stuff - This should probably be separated into it's own
+-- source file
+
+hudsonStyle :: LanguageDef st
+hudsonStyle = T.LanguageDef       -- TODO: was emptyDef removed?
+                { T.commentStart    = ""
+                , T.commentEnd      = ""
+                , T.commentLine     = "#"
+                , T.nestedComments  = False
+                , T.identStart      = letter <|> char '.'
+                , T.identLetter     = alphaNum <|> oneOf "._"
+                , T.opStart         = T.opLetter hudsonStyle
+                , T.opLetter        = oneOf ":%*+/<=>?^-"
+                , T.reservedNames   = []
+                , T.reservedOpNames = []
+                , T.caseSensitive   = True
+                }
+
+hudsonDef :: LanguageDef st
+hudsonDef = hudsonStyle
+            { T.reservedOpNames = [":=", "?"]
+            , T.reservedNames = ["and", "assert", "class", "constant", "do", "else",
+                                 "false", "fun", "function", "if", "inherit", "is",
+                                 "not", "null", "or", "procedure", "ref", "return",
+                                 "then", "this", "true", "variable", "while"]
+            }
+
+lexer :: TokenParser st
+lexer = T.makeTokenParser hudsonDef
+
+reserved = T.reserved lexer
+identifier = T.identifier lexer
+commaSep = T.commaSep lexer
+parens = T.parens lexer
+integer = T.integer lexer
+whiteSpace = T.whiteSpace lexer          
