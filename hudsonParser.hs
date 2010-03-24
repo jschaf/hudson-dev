@@ -2,7 +2,7 @@ import Text.ParserCombinators.Parsec
 import Text.ParserCombinators.Parsec.Token (LanguageDef, TokenParser)
 import qualified Text.ParserCombinators.Parsec.Token as T
 import Control.Monad
-
+import Data.Char (isSpace)
 -- TODO: Maybe remove the extra level of indirection in HDecl.  The
 -- problem is then the parsers aren't completely type safe but I'm not
 -- sure if that's necessary or important.  It would create a huge data
@@ -67,10 +67,11 @@ parseCode n = many1 parseCode' <?> "indented declaration"
 -- TODO: handle optional types and ref indicator
 parseParams = parens (commaSep identifier)
 
-hudFunc = "function blah(one, two) is\n  write(1)\n  function nest () is\n    #write(2)\n"
+hudFunc = "function blah(one, two) is\n  write(1)\n  function nest () is\n    write(2)\n"
        ++ "function joe (three, four) is \n  write(3)\n"
        ++ "write(4)"
 
+pr = putStrLn hudFunc
 test = parse parseFile "hudson" hudFunc
 
 -- TODO: The tokenizing helpers should probably be separated in its
@@ -101,7 +102,22 @@ hudsonDef = hudsonStyle
             }
 
 lexer :: TokenParser st
-lexer = T.makeTokenParser hudsonDef
+lexer = let newLineLexer = T.makeTokenParser hudsonDef in
+        newLineLexer
+        { T.whiteSpace = skipMany (simpleHorizontalSpace <|> oneLineComment <?> "")
+        -- Override the whiteSpace definition to not consume newlines
+        -- because they are significant in Hudson.
+
+        }
+        
+-- Copied from Parsec.Token source.
+oneLineComment = do try (string (T.commentLine hudsonDef))
+                    skipMany (satisfy (/= '\n'))
+                    return ()
+
+-- Copied and modified from Parsec.Token source.
+simpleHorizontalSpace = skipMany1 (satisfy isHorizontalSpace)
+isHorizontalSpace c = c /= '\r' && c /= '\n' && isSpace c
 
 reserved = T.reserved lexer
 identifier = T.identifier lexer
