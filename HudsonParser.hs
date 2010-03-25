@@ -11,13 +11,13 @@ data Block = BlockStmt Stmt
 type VarID = String
 type ClassID = String
 
-data Stmt = Null
-          | Assignment VarID Expr
+data Stmt = Assignment VarID Expr
           | ProcCall VarID [Expr]
-          | Return (Maybe Expr)
           | If {condition :: Expr, thenCode :: [Block], elseCode :: [Block]}
           | While {condition :: Expr, whileCode :: [Block]}
+          | Return (Maybe Expr)
           | Assert Expr
+          | Null
             deriving (Show)
 
 data Decl = VarDecl {varName :: VarID, varType :: (Maybe ClassID), varExpr :: Expr}
@@ -86,24 +86,30 @@ parseBlock = liftM BlockStmt parseStmt
          <?> "declaration or statemnt"
 
 parseStmt :: CharParser () Stmt
-parseStmt = parseReturn
+parseStmt = parseAssign
+        <|> parseProcCall
+        <|> parseIf
+        <|> parseWhile
+        <|> parseReturn
         <|> parseAssert
         <|> parseNull
         <?> "statement"
 
 parseDecl :: CharParser () Decl
-parseDecl = parseFuncDecl
-        <|> parseVarDecl
+parseDecl = parseVarDecl
+        <|> parseConstDecl
+        <|> parseFuncDecl
+        <|> parseProcDecl
+        <|> parseClassDecl
         <?> "declaration"
 
-parseVarDecl :: CharParser () Decl
-parseVarDecl = do
-  reserved "variable"
-  n <- parseVarID
-  optType <- parseOptionalType
-  reservedOp ":="
-  e <- parseExpr
-  return VarDecl {varName = n, varType = optType, varExpr = e}
+parseAssign = undefined
+
+parseProcCall = undefined
+
+parseIf = undefined
+
+parseWhile = undefined
 
 parseReturn = do
   reserved "return"
@@ -117,17 +123,18 @@ parseAssert = do
 
 parseNull = reserved "null" >> return Null
 
-parseExpr = return $ Literal (LiteralInt 2)
+-- Declarations
 
-validChar = alphaNum <|> char '_'
+parseVarDecl = do
+  reserved "variable"
+  n <- parseVarID
+  optType <- parseOptionalType
+  reservedOp ":="
+  e <- parseExpr
+  return VarDecl {varName = n, varType = optType, varExpr = e}
 
-parseClassID :: CharParser () ClassID
-parseClassID = liftM2 (:) upper (lexeme $ many validChar)
+parseConstDecl = undefined
 
-parseVarID :: CharParser () VarID
-parseVarID = liftM2 (:) lower (lexeme $ many validChar)
-
-parseFuncDecl :: CharParser () Decl
 parseFuncDecl = do
   indent <- liftM sourceColumn getPosition
   reserved "function"
@@ -137,20 +144,11 @@ parseFuncDecl = do
   c <- return [] --parseCode indent
   return $ FuncDecl {funcName = n, funcParams = ps, funcCode = c}
 
--- -- | Parse indented code block of a method or class.  Parses all code
--- -- indented greater than n spaces.
--- parseCode :: Int -> CharParser () [HDecl]
--- parseCode n = many1 parseCode' <?> "indented declaration"
---     where
---       parseCode' = do indent <- liftM sourceColumn getPosition
---                       if indent > n then parseDecl else pzero
+parseProcDecl = undefined
 
-parseOptionalType :: CharParser () (Maybe ClassID)
-parseOptionalType = do reservedOp ":"
-                       c <- parseClassID
-                       return $ Just c
-                <|> return Nothing
-  
+parseClassDecl = undefined
+
+-- Params
 parseParams = parens (commaSep parseParam)
 
 parseParam = do
@@ -158,6 +156,32 @@ parseParam = do
   v <- parseVarID
   t <- parseOptionalType
   return $ Param {ref = r, paramName = v, pType = t}
+
+-- Expressions
+parseExpr = return $ Literal (LiteralInt 2)
+
+-- Utilities
+validChar = alphaNum <|> char '_'
+
+parseClassID :: CharParser () ClassID
+parseClassID = liftM2 (:) upper (lexeme $ many validChar)
+
+parseVarID :: CharParser () VarID
+parseVarID = liftM2 (:) lower (lexeme $ many validChar)
+
+parseOptionalType :: CharParser () (Maybe ClassID)
+parseOptionalType = do reservedOp ":"
+                       c <- parseClassID
+                       return $ Just c
+                <|> return Nothing
+
+-- -- | Parse indented code block of a method or class.  Parses all code
+-- -- indented greater than n spaces.
+-- parseCode :: Int -> CharParser () [HDecl]
+-- parseCode n = many1 parseCode' <?> "indented declaration"
+--     where
+--       parseCode' = do indent <- liftM sourceColumn getPosition
+--                       if indent > n then parseDecl else pzero
 
 hudFunc = "function blah(one, two) is\n  write(1)\n  function nest () is\n    write(2)\n"
        ++ "function joe (three, four) is \n  write(3)\n"
