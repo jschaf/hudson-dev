@@ -6,7 +6,7 @@ import HudsonToken
 
 data Block = BlockStmt Stmt
            | BlockDecl Decl
-             deriving (Show)
+             deriving (Eq, Show)
 
 type VarID = String
 type ClassID = String
@@ -18,7 +18,7 @@ data Stmt = Assignment VarID Expr
           | Return (Maybe Expr)
           | Assert Expr
           | Null
-            deriving (Show)
+            deriving (Eq, Show)
 
 data Decl = VarDecl {varName :: VarID, varType :: (Maybe ClassID), varExpr :: Expr}
           | ConstDecl VarID Expr
@@ -28,28 +28,22 @@ data Decl = VarDecl {varName :: VarID, varType :: (Maybe ClassID), varExpr :: Ex
                        inherits :: Maybe ClassID,
                        subtypes :: [ClassID],
                        classCode :: [Block]}
-            deriving (Show)
+            deriving (Eq, Show)
 
-data Param = Param {ref :: Bool, paramName :: VarID, pType :: (Maybe ClassID)}
+data Param = Param {ref :: Bool, paramName :: VarID, paramType :: (Maybe ClassID)}
              deriving (Eq, Show)
 
-data Expr = Literal LiteralOp
-          | Unary UnaryOp Expr
+data Expr = LiteralInt Int
+          | LiteralStr String
+          | LiteralBool Bool
+          | LiteralNull
+          | Negate Expr
+          | Not Expr
           | Binary BinaryOp Expr Expr
           | VarID String
           | FuncCall String
           | TypeTest Expr String
-            deriving (Show)
-
-data LiteralOp = LiteralInt Int
-               | LiteralStr String
-               | LiteralBool Bool
-               | LiteralNull
-                 deriving (Show)
-
-data UnaryOp = Negate            -- ^ integer negation
-             | Not               -- ^ boolean negation
-               deriving (Show)
+            deriving (Eq, Show)
 
 data BinaryOp = Add
               | Sub
@@ -65,7 +59,7 @@ data BinaryOp = Add
               | And
               | Or
               | Concat
-                deriving (Show)
+                deriving (Eq, Show)
 
 -- TODO
 --
@@ -141,7 +135,7 @@ parseFuncDecl = do
   n <- identifier
   ps <- parseParams
   reserved "is"
-  c <- return [] --parseCode indent
+  c <- parseCode indent
   return $ FuncDecl {funcName = n, funcParams = ps, funcCode = c}
 
 parseProcDecl = undefined
@@ -155,10 +149,10 @@ parseParam = do
   r <- (reserved "ref" >> return True) <|> return False
   v <- parseVarID
   t <- parseOptionalType
-  return $ Param {ref = r, paramName = v, pType = t}
+  return $ Param {ref = r, paramName = v, paramType = t}
 
 -- Expressions
-parseExpr = return $ Literal (LiteralInt 2)
+parseExpr = return $ LiteralInt 2
 
 -- Utilities
 validChar = alphaNum <|> char '_'
@@ -175,13 +169,13 @@ parseOptionalType = do reservedOp ":"
                        return $ Just c
                 <|> return Nothing
 
--- -- | Parse indented code block of a method or class.  Parses all code
--- -- indented greater than n spaces.
--- parseCode :: Int -> CharParser () [HDecl]
--- parseCode n = many1 parseCode' <?> "indented declaration"
---     where
---       parseCode' = do indent <- liftM sourceColumn getPosition
---                       if indent > n then parseDecl else pzero
+-- | Parse indented code block of a method or class.  Parses all code
+-- indented greater than n spaces.
+parseCode :: Int -> CharParser () [Block]
+parseCode n = many1 parseCode' <?> "indented declaration"
+    where
+      parseCode' = do indent <- liftM sourceColumn getPosition
+                      if indent > n then parseBlock else pzero
 
 hudFunc = "function blah(one, two) is\n  write(1)\n  function nest () is\n    write(2)\n"
        ++ "function joe (three, four) is \n  write(3)\n"
