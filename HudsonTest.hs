@@ -4,7 +4,8 @@ import Text.ParserCombinators.Parsec
 import HudsonParser
 import Test.HUnit
 
-param a b c = Just $ Param {ref = a, paramName = b, pType = c}
+param a b c = Just $ Param {ref = a, paramName = b, paramType = c}
+func a b c = Just $ FuncDecl {funcName = a, funcParams = b, funcCode = c}
 
 parseResult p i = either (const Nothing) Just $ parse p "Hudson" i
 
@@ -20,4 +21,21 @@ testParamType = "Param with a ref and type" ~:
                 param True "param_3A" (Just "Type") ~=?
                 parseResult parseParam "ref param_3A : Type"
 
-paramTests = TestList [testParamSimple, testParamRef, testParamType]
+
+testParamNewline = "Param with a bad newline" ~:
+                   Nothing ~=? parseResult parseParam "\nref"
+
+paramTests = TestLabel "param Tests" $
+             TestList [testParamSimple, testParamRef, testParamType, testParamNewline]
+
+testFuncSimple = "Simple Func" ~:
+                 func "simple" [] [BlockStmt $ Return $ Just $ LiteralInt 2] ~=?
+                 parseResult parseFuncDecl "function simple () is return 2"
+                 
+
+funcTests = TestLabel "func Tests" $
+            TestList [testFuncSimple]
+
+allTests = TestList [paramTests, funcTests]
+
+main = runTestTT allTests
