@@ -1,15 +1,66 @@
 import Text.ParserCombinators.Parsec
-import Text.ParserCombinators.Parsec.Token (LanguageDef, TokenParser)
 import qualified Text.ParserCombinators.Parsec.Token as T
 import Control.Monad
 import Data.Char (isSpace)
--- TODO: Maybe remove the extra level of indirection in HDecl.  The
--- problem is then the parsers aren't completely type safe but I'm not
--- sure if that's necessary or important.  It would create a huge data
--- declaration if the info was created here directly.
+
 data HDecl = Func HFunc
            | Write HWrite
            deriving (Show)
+
+
+data Block = Stmt | Decl
+
+type VarID = String
+type ClassID = String
+
+data Stmt = Null
+          | Assignment VarID Expr
+          | ProcCall VarID [Expr]
+          | Return (Maybe Expr)
+          | If {condition :: Expr, thenCode :: [Block], elseCode :: [Block]}
+          | While {condition :: Expr, whileCode :: [Block]}
+          | Assert Expr
+
+data Decl = VarDecl VarID Expr
+          | ConstDecl VarID Expr
+          | ProcDecl {funcName :: VarID, funcParams :: [Param], funcCode :: [Block]}
+          | FuncDecl {procName :: VarID, procParams :: [Param], procCode :: [Block]}
+          | ClassDecl {className :: ClassID,
+                       inherits :: Maybe ClassID,
+                       subtypes :: [ClassID],
+                       classCode :: [Block]}
+
+data Param = Param {ref :: Bool, varID :: VarID, pType :: (Maybe ClassID)}
+
+data Expr = Literal LiteralOp
+          | Unary UnaryOp Expr
+          | Binary BinaryOp Expr Expr
+          | VarID String
+          | FuncCall String
+          | TypeTest Expr String
+
+data LiteralOp = LiteralInt Int
+               | LiteralStr String
+               | LiteralBool Bool
+               | LiteralNull
+
+data UnaryOp = Negate            -- ^ integer negation
+             | Not               -- ^ boolean negation
+
+data BinaryOp = Add
+              | Sub
+              | Mult
+              | Div
+              | Mod
+              | Equal
+              | NotEqual
+              | LessThan
+              | LessThanEqual
+              | GreaterThan
+              | GreaterThanEqual
+              | And
+              | Or
+              | Concat
 
 data HFunc = HFunc {name :: HId,
                     params :: HParams,
@@ -25,9 +76,9 @@ type HParams = [HId]
 
 
 -- TODO
--- 
+--
 -- * Have a separate lex phase to resolve continuation comments.
--- 
+--
 -- * How to handle offside rule?  Maybe add an indentation parameter
 -- to parseCode.
 --
@@ -77,7 +128,7 @@ test = parse parseFile "hudson" hudFunc
 -- TODO: The tokenizing helpers should probably be separated in its
 -- own module.
 
-hudsonStyle :: LanguageDef st
+hudsonStyle :: T.LanguageDef st
 hudsonStyle = T.LanguageDef       -- TODO: was emptyDef removed?
                 { T.commentStart    = ""
                 , T.commentEnd      = ""
@@ -92,7 +143,7 @@ hudsonStyle = T.LanguageDef       -- TODO: was emptyDef removed?
                 , T.caseSensitive   = True
                 }
 
-hudsonDef :: LanguageDef st
+hudsonDef :: T.LanguageDef st
 hudsonDef = hudsonStyle
             { T.reservedOpNames = [":=", "?"]
             , T.reservedNames = ["and", "assert", "class", "constant", "do", "else",
@@ -101,15 +152,16 @@ hudsonDef = hudsonStyle
                                  "then", "this", "true", "variable", "while"]
             }
 
-lexer :: TokenParser st
+lexer :: T.TokenParser st
 lexer = let newLineLexer = T.makeTokenParser hudsonDef in
         newLineLexer
+        -- TODO: still consumes newlines
         { T.whiteSpace = skipMany (simpleHorizontalSpace <|> oneLineComment <?> "")
         -- Override the whiteSpace definition to not consume newlines
         -- because they are significant in Hudson.
 
         }
-        
+
 -- Copied from Parsec.Token source.
 oneLineComment = do try (string (T.commentLine hudsonDef))
                     skipMany (satisfy (/= '\n'))
@@ -124,4 +176,4 @@ identifier = T.identifier lexer
 commaSep = T.commaSep lexer
 parens = T.parens lexer
 integer = T.integer lexer
-whiteSpace = T.whiteSpace lexer          
+whiteSpace = T.whiteSpace lexer
