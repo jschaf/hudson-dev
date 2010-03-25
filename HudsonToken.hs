@@ -14,7 +14,7 @@ hudsonStyle = T.LanguageDef       -- TODO: was emptyDef removed?
                 , T.commentLine     = "#"
                 , T.nestedComments  = False
                 , T.identStart      = letter <|> char '.'
-                , T.identLetter     = alphaNum <|> oneOf "._"
+                , T.identLetter     = alphaNum <|> char '_'
                 , T.opStart         = T.opLetter hudsonStyle
                 , T.opLetter        = oneOf ":%*+/<=>?^-"
                 , T.reservedNames   = []
@@ -35,7 +35,8 @@ lexer :: T.TokenParser st
 lexer = let newLineLexer = T.makeTokenParser hudsonDef in
         newLineLexer
         -- TODO: still consumes newlines
-        { T.whiteSpace = skipMany (simpleHorizontalSpace <|> oneLineComment <?> "")
+        { T.whiteSpace = whiteSpace,
+          T.lexeme = lexeme
         -- Override the whiteSpace definition to not consume newlines
         -- because they are significant in Hudson.
 
@@ -57,5 +58,5 @@ identifier = T.identifier lexer
 commaSep = T.commaSep lexer
 parens = T.parens lexer
 integer = T.integer lexer
-whiteSpace = T.whiteSpace lexer
-lexeme = T.lexeme lexer
+whiteSpace = skipMany (simpleHorizontalSpace <|> oneLineComment <?> "")
+lexeme p = do {x <- p; T.whiteSpace; return x}
