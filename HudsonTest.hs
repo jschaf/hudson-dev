@@ -4,8 +4,8 @@ import Text.ParserCombinators.Parsec
 import HudsonParser
 import Test.HUnit
 
-param a b c = Just $ Param {ref = a, paramName = b, paramType = c}
-func a b c = Just $ FuncDecl {funcName = a, funcParams = b, funcCode = c}
+param a b c = Just Param {ref = a, paramName = b, paramType = c}
+func a b c = Just FuncDecl {funcName = a, funcParams = b, funcCode = c}
 
 parseResult p i = either (const Nothing) Just $ parse p "Hudson" i
 
