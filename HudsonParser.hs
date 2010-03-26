@@ -13,19 +13,19 @@ type ClassID = String
 
 data Stmt = Assignment VarID Expr
           | ProcCall VarID [Expr]
-          | If {condition :: Expr, thenCode :: [Block], elseCode :: [Block]}
-          | While {condition :: Expr, whileCode :: [Block]}
+          | If {ifCond :: Expr, thenCode :: [Block], elseCode :: [Block]}
+          | While {whileCond :: Expr, whileCode :: [Block]}
           | Return (Maybe Expr)
           | Assert Expr
           | Null
             deriving (Eq, Show)
 
 data Decl = VarDecl {varName :: VarID, varType :: (Maybe ClassID), varExpr :: Expr}
-          | ConstDecl VarID Expr
+          | ConstDecl {constName :: VarID, constType :: (Maybe ClassID), constExpr :: Expr}
           | FuncDecl {funcName :: VarID, funcParams :: [Param], funcCode :: [Block]}
           | ProcDecl {procName :: VarID, procParams :: [Param], procCode :: [Block]}
           | ClassDecl {className :: ClassID,
-                       inherits :: Maybe ClassID,
+                       inherit :: Maybe ClassID,
                        subtypes :: [ClassID],
                        classCode :: [Block]}
             deriving (Eq, Show)
@@ -33,7 +33,7 @@ data Decl = VarDecl {varName :: VarID, varType :: (Maybe ClassID), varExpr :: Ex
 data Param = Param {ref :: Bool, paramName :: VarID, paramType :: (Maybe ClassID)}
              deriving (Eq, Show)
 
-data Expr = LiteralInt Int
+data Expr = LiteralInt Integer
           | LiteralStr String
           | LiteralBool Bool
           | LiteralNull
@@ -63,13 +63,14 @@ data BinaryOp = Add
 
 -- TODO
 --
--- * Have a separate lex phase to resolve continuation comments.
+-- Have a separate scanner to resolve continuation comments and
+-- indentation.
 --
--- * How to handle offside rule?  Maybe add an indentation parameter
--- to parseCode.
+-- Allow single line function and procedure declarations.
 --
--- * The lexer built by makeTokenParser ignores newlines.  The current
--- parser is very accepting of malformed input.
+-- Add more error messages.
+--
+-- Create expression parser.
 
 parseFile :: CharParser () [Block]
 parseFile = manyTill parseBlock eof
@@ -97,18 +98,41 @@ parseDecl = parseVarDecl
         <|> parseClassDecl
         <?> "declaration"
 
-parseAssign = undefined
+parseAssign = try $ do
+  v <- varIdentifier
+  reservedOp ":="
+  e <- parseExpr
+  -- TODO: newline
+  return $ Assignment v e
 
-parseProcCall = undefined
+parseProcCall = try $ do
+  p <- varIdentifier
+  ps <- parens (commaSep parseExpr)
+  verticalSpace
+  return $ ProcCall p ps
 
-parseIf = undefined
+parseIf = do
+  reserved "if"
+  cond <- parseExpr
+  reserved "then"
+  verticalSpace
+  c <- parseCode
+  return $ If cond c []
 
-parseWhile = undefined
+parseWhile = do
+  reserved "while"
+  cond <- parseExpr
+  reserved "do"
+  -- TODO: newline
+  code <- parseCode
+  return $ While cond code
+          
 
 parseReturn = do
   reserved "return"
-  e <- parseExpr
-  return $ Return (Just e)
+  e <- try (liftM Just parseExpr) <|> (whiteSpace >> return Nothing)
+  verticalSpace
+  return $ Return e
 
 parseAssert = do
   reserved "assert"
@@ -121,61 +145,78 @@ parseNull = reserved "null" >> return Null
 
 parseVarDecl = do
   reserved "variable"
-  n <- parseVarID
+  n <- varIdentifier
   optType <- parseOptionalType
   reservedOp ":="
   e <- parseExpr
   return VarDecl {varName = n, varType = optType, varExpr = e}
 
-parseConstDecl = undefined
+
+parseConstDecl = do
+  reserved "constant"
+  n <- varIdentifier
+  optType <- parseOptionalType
+  reservedOp ":="
+  e <- parseExpr
+  return ConstDecl {constName = n, constType = optType, constExpr = e}
+
 
 parseFuncDecl = do
-  indent <- liftM sourceColumn getPosition
   reserved "function"
-  n <- identifier
+  n <- varIdentifier
   ps <- parseParams
   reserved "is"
-  c <- parseCode indent
-  return $ FuncDecl {funcName = n, funcParams = ps, funcCode = c}
+  verticalSpace
+  c <- parseCode
+  return FuncDecl {funcName = n, funcParams = ps, funcCode = c}
 
-parseProcDecl = undefined
+parseProcDecl = do
+  reserved "procedure"
+  n <- varIdentifier
+  ps <- parseParams
+  reserved "is"
+  verticalSpace
+  c <- parseCode
+  return ProcDecl {procName = n, procParams = ps, procCode = c}
 
-parseClassDecl = undefined
+parseClassDecl = do
+  reserved "class"
+  n <- classIdentifier
+  i <- liftM Just (reserved "inherit" >> classIdentifier) <|> return Nothing
+  s <- (reservedOp "<" >> commaSep1 classIdentifier) <|> return []
+  reserved "is"
+  verticalSpace
+  c <- parseCode
+  return ClassDecl {className = n, inherit = i, subtypes = s, classCode = c}
 
 -- Params
 parseParams = parens (commaSep parseParam)
 
 parseParam = do
   r <- (reserved "ref" >> return True) <|> return False
-  v <- parseVarID
+  v <- varIdentifier
   t <- parseOptionalType
-  return $ Param {ref = r, paramName = v, paramType = t}
+  return Param {ref = r, paramName = v, paramType = t}
 
 -- Expressions
-parseExpr = return $ LiteralInt 2
-
--- Utilities
-validChar = alphaNum <|> char '_'
-
-parseClassID :: CharParser () ClassID
-parseClassID = liftM2 (:) upper (lexeme $ many validChar)
-
-parseVarID :: CharParser () VarID
-parseVarID = liftM2 (:) lower (lexeme $ many validChar)
+parseExpr = liftM LiteralInt integer
 
 parseOptionalType :: CharParser () (Maybe ClassID)
-parseOptionalType = do reservedOp ":"
-                       c <- parseClassID
-                       return $ Just c
+parseOptionalType = try (liftM Just (colon >> classIdentifier))
                 <|> return Nothing
 
 -- | Parse indented code block of a method or class.  Parses all code
 -- indented greater than n spaces.
-parseCode :: Int -> CharParser () [Block]
-parseCode n = many1 parseCode' <?> "indented declaration"
+parseCode :: CharParser () [Block]
+parseCode = do
+  whiteSpace
+  indent <- liftM sourceColumn getPosition
+  -- TODO: check to make sure indent is greater than parent indent
+  sepBy1 (parseCode' indent) verticalSpace <?> "indented declaration"
     where
-      parseCode' = do indent <- liftM sourceColumn getPosition
-                      if indent > n then parseBlock else pzero
+      parseCode' n = do whiteSpace
+                        indent <- liftM sourceColumn getPosition
+                        if indent >= n then parseBlock else pzero
 
 hudFunc = "function blah(one, two) is\n  write(1)\n  function nest () is\n    write(2)\n"
        ++ "function joe (three, four) is \n  write(3)\n"
@@ -184,3 +225,4 @@ hudFunc = "function blah(one, two) is\n  write(1)\n  function nest () is\n    wr
 pr = putStrLn hudFunc
 test = parse parseFile "hudson" hudFunc
 
+pt a b = parse a "h" b
