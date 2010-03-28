@@ -3,11 +3,9 @@ module HudsonTest where
 import Text.ParserCombinators.Parsec
 import HudsonParser
 import Test.HUnit
-
+import HudsonPreproc (parseResult)
 param a b c = Just Param {ref = a, paramName = b, paramType = c}
 func a b c = Just FuncDecl {funcName = a, funcParams = b, funcCode = c}
-
-parseResult p i = either (const Nothing) Just $ parse p "Hudson" i
 
 testParamSimple = "Simple param" ~:
                   param False "param" Nothing ~=?
@@ -30,7 +28,7 @@ paramTests = TestLabel "param Tests" $
 
 testFuncSimple = "Simple Func" ~:
                  func "simple" [] [BlockStmt $ Return $ Just $ LiteralInt 2] ~=?
-                 parseResult parseFuncDecl "function simple () is return 2"
+                 parseResult parseFuncDecl "function simple () is\n   return 2"
                  
 
 funcTests = TestLabel "func Tests" $
