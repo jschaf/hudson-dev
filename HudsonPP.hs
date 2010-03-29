@@ -33,15 +33,14 @@ prettyStmt (ProcCall v ps) =
     text v <> (parens . sep . punctuate (char ',') . map prettyExpr $ ps)
 
 prettyStmt (If cond ts []) =
-    text "if" <+> (prettyExpr cond) <+> text "then" $$ nestBlocks ts
+    text "if" <+> prettyExpr cond <+> text "then" $$ nestBlocks ts
 
 prettyStmt (If cond ts es) =
-    text "if" <+> (prettyExpr cond) <+> text "then" $$ nestBlocks ts $$
+    text "if" <+> prettyExpr cond <+> text "then" $$ nestBlocks ts $$
     text "else" $$ nestBlocks es
 
 prettyStmt (While cond ws) =
-    text "while" <+> prettyExpr cond <+> text "do"
-    $$ (nestBlocks ws)
+    text "while" <+> prettyExpr cond <+> text "do" $$ nestBlocks ws
 
 prettyStmt (Return (Just e)) = text "return" <+> prettyExpr e
 prettyStmt (Return Nothing) = text "return"
@@ -68,15 +67,15 @@ prettyDecl (ConstDecl name ctype expr) =
 
 prettyDecl (FuncDecl name params code) =
     text "function" <+> text name <> prettyParams params <+> text "is"
-    $$ (nestBlocks code)
+    $$ nestBlocks code
 
 prettyDecl (ProcDecl name params code) =
     text "procedure" <+> text name <> prettyParams params <+> text "is"
-    $$ (nestBlocks code)
+    $$ nestBlocks code
 
 prettyDecl (ClassDecl name inherit subtypes code) =
     text "class" <+> text name <+> pInherit inherit <+> pSubs subtypes
- $$ prettyBlocks code
+    $$ prettyBlocks code
     where pInherit Nothing = empty
           pInherit (Just p) = text "inherit" <+> text p
           pSubs [] = empty
@@ -89,7 +88,7 @@ prettyExpr (LiteralBool False) = text "false"
 prettyExpr (LiteralNull) = text "null"
 prettyExpr (Negate e) = char '-' <> prettyExpr e
 prettyExpr (Not e) = text "not" <> prettyExpr e
-prettyExpr (Binary b l r) = prettyExpr l <+> (prettyBinary b) <+> prettyExpr r
+prettyExpr (Binary b l r) = prettyExpr l <+> prettyBinary b <+> prettyExpr r
 prettyExpr (VarID s) = text s
 prettyExpr (FuncCall s) = text s <> text "()"
 prettyExpr (TypeTest e s) = prettyExpr e <> char '?' <> text s
