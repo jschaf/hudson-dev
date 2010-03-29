@@ -1,10 +1,12 @@
 module HudsonParser where
 
-import Text.ParserCombinators.Parsec
+import Text.ParserCombinators.Parsec hiding (spaces)
 import Control.Monad
 import Control.Applicative ((<*))
 import HudsonToken
-import HudsonPreproc (normalize)
+import HudsonPreproc (normalize, parseResult)
+import Text.Printf
+
 data Block = BlockStmt Stmt
            | BlockDecl Decl
              deriving (Eq, Show)
@@ -76,17 +78,17 @@ parseFile fname = do
   input <- readFile fname
   return $ parseInput input
 
--- parseInput :: String -> [Block]
+parseInput :: String -> Maybe [Block]
 parseInput s = ps
     where s' = maybe "" id (normalize s)
-          ps = parse (manyTill parseBlock eof) "" s'
+          ps = parseResult (manyTill parseBlock eof) s'
 
-parseBlock :: CharParser () Block
+parseBlock :: Parser Block
 parseBlock = liftM BlockStmt parseStmt
          <|> liftM BlockDecl parseDecl
          <?> "declaration or statemnt"
 
-parseStmt :: CharParser () Stmt
+parseStmt :: Parser Stmt
 parseStmt = parseAssign
         <|> parseProcCall
         <|> parseIf
@@ -96,7 +98,7 @@ parseStmt = parseAssign
         <|> parseNull
         <?> "statement"
 
-parseDecl :: CharParser () Decl
+parseDecl :: Parser Decl
 parseDecl = parseVarDecl
         <|> parseConstDecl
         <|> parseFuncDecl
@@ -120,13 +122,13 @@ parseProcCall = try $ do
 parseIf = do
   indent <- getIndent
   parseIf' indent
-
+           
 parseIf' n = do
   reserved "if"
   cond <- parseExpr
   reserved "then"
   ifCode <- parseCode n
-  elseCode <- parseElse n
+  elseCode <- parseElse n <|> return []
   return $ If cond ifCode elseCode
 
 parseElse indent = do
@@ -136,6 +138,28 @@ parseElse indent = do
   enclosedIf <|> parseCode indent
       where enclosedIf = liftM ((:[]) . BlockStmt) (parseIf' indent)
 
+
+-- | Parse indented code block of a method or class.  Parses all code
+-- indented greater than n spaces.
+parseCode :: Int -> Parser [Block]
+parseCode n = multipleStmts <|> singleStmt
+    where
+      singleStmt = liftM (:[]) parseBlock
+      multipleStmts = newline >> parseMultStmts n
+
+parseMultStmts n = do
+  whiteSpace
+  indent <- getIndent
+  if indent <= n
+     then fail "need indented declaration"
+     else many1 (parseCode' indent) <?> "indented declaration"
+    where
+      parseCode' m = do whiteSpace
+                        indent <- getIndent
+                        if indent >= m
+                           then parseBlock
+                           else pzero
+
 parseWhile = do
   indent <- getIndent
   reserved "while"
@@ -144,10 +168,9 @@ parseWhile = do
   code <- parseCode indent
   return $ While cond code
           
-
 parseReturn = do
   reserved "return"
-  e <- try (liftM Just parseExpr) <|> (whiteSpace >> return Nothing)
+  e <- option Nothing $ try (liftM Just parseExpr)
   newline
   return $ Return e
 
@@ -219,30 +242,9 @@ parseParam = do
 -- Expressions
 parseExpr = liftM LiteralInt integer
 
-parseOptionalType :: CharParser () (Maybe ClassID)
+parseOptionalType :: Parser (Maybe ClassID)
 parseOptionalType = try (liftM Just (colon >> classIdentifier))
                 <|> return Nothing
-
--- | Parse indented code block of a method or class.  Parses all code
--- indented greater than n spaces.
-parseCode :: Int -> CharParser () [Block]
-parseCode n = singleStmt <|> multipleStmts
-    where
-      singleStmt = liftM (:[]) parseBlock
-      multipleStmts = newline >> parseMultStmts n
-
-parseMultStmts n = do
-  spaces
-  indent <- getIndent
-  if indent <= n
-     then fail "need indented declaration"
-     else many1 (parseCode' indent) <?> "indented declaration"
-    where
-      parseCode' m = do spaces
-                        indent <- getIndent
-                        if indent >= m
-                           then parseBlock <?> "gubba, gubba"
-                           else pzero
 
 hudFunc = "function blah(one, two) is\n  write(1)\n  function nest () is\n    write(2)\n"
        ++ "function joe (three, four) is \n  write(3)\n"
