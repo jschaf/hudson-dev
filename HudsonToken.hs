@@ -154,6 +154,7 @@ symbol name = lexeme (string name)
 
 lexeme p = do{ x <- p; whiteSpace; return x  }
 
+spaces = many (char ' ')
 whiteSpace = skipMany (simpleHorizontalSpace <|> oneLineComment <?> "")
     where
       oneLineComment = try (string "#") >> skipMany (satisfy (/= '\n')) >> return ()
