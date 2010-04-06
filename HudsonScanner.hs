@@ -8,7 +8,6 @@ module HudsonScanner
      tokenizeHudsonFile
     ) where
 
-import Control.Monad
 import Control.Applicative (liftA, liftA2)
 
 import Data.Char
@@ -19,6 +18,12 @@ import Text.Parsec ((<?>), parseTest)
 import Text.Parsec.Combinator
 import Text.Parsec.Prim
 import Text.Parsec.Pos
+
+-- TODO:
+--
+-- Try to not rewrite all the Parsec Char parsers
+--
+-- Find some way to remove the type signatures
 
 type Pos = (Int, Int)
 
