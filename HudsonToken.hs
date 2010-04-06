@@ -5,8 +5,6 @@ import qualified Text.ParserCombinators.Parsec.Token as T
 import Data.Char (isAlpha, toLower, toUpper, isSpace, digitToInt)
 import Data.List (sort, elem)
 import Control.Monad
--- TODO: The tokenizing helpers should probably be separated in its
--- own module.
 
 hudsonDef :: T.LanguageDef st
 hudsonDef = T.LanguageDef       -- TODO: was emptyDef removed?
