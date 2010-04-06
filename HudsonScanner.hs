@@ -2,10 +2,12 @@
 {-# LANGUAGE FlexibleInstances #-}
 
 module HudsonScanner
-    (tokenize,
+    (removeJunk,
+     tokenize,
      Token,
+     tokenizeHudsonFile,
      Tok(..),
-     tokenizeHudsonFile
+     -- tokenizeHudsonFile
     ) where
 
 import Control.Applicative (liftA, liftA2)
@@ -25,15 +27,15 @@ import Text.Parsec.Pos
 --
 -- Find some way to remove the type signatures
 
-type Pos = (Int, Int)
+-- type Pos = (Int, Int)
 
-data CharPos = CharPos {cpChar :: Char, cpPos :: Pos}
+data CharPos = CharPos {cpChar :: Char, cpPos :: SourcePos}
              deriving (Show)
 
 instance Eq CharPos where
     (==) = (==) `on` cpChar
 
-type Token  = (Tok, Pos)
+type Token  = (Tok, SourcePos)
 
 data Tok = Tok Tag String
            deriving (Show)
@@ -51,8 +53,8 @@ data Tag = Number
 
 tokenizeHudsonFile fname = do
   input <- readFile fname
-  let lexed = prelex input
-  return (runP tokenize () fname lexed)
+  let lexed = prelex input fname
+  return $ runP tokenize () fname lexed
 
 removeJunk :: [Token] -> [Token]
 removeJunk = filter f
@@ -63,20 +65,20 @@ toString :: [CharPos] -> String
 toString = map cpChar
 
 -- | Pair each character with its source position.
-prelex :: String -> [CharPos]
-prelex xs = snd $ mapAccumL step (1,1) xs
-    where
-      step (r,c) x | x == '\n' = ((r+1, 0), charInfo)
-                   | otherwise = ((r, c+1), charInfo)
-          where charInfo = CharPos x (r,c)
+prelex :: String -> String -> [CharPos]
+prelex xs sname = prelex' (initialPos sname) xs
 
-updateCharPos :: SourcePos -> CharPos -> SourcePos
-updateCharPos _s (CharPos c (line, col)) = newPos [c] line col
+prelex' initial xs = snd $ mapAccumL step initial xs
+    where
+      step srcPos c = (updatePosChar srcPos c, CharPos c srcPos)
+
+updatePos :: SourcePos -> CharPos -> SourcePos
+updatePos srcPos (CharPos c pos) = updatePosChar srcPos c
 
 -- TODO: This is reinventing the wheel but I don't know a better way.
 satisfy :: (Stream s m CharPos) => (Char -> Bool) -> ParsecT s u m CharPos
 satisfy f           = tokenPrim (\cp -> show [(cpChar cp)])
-                                (\pos c _cs -> updateCharPos pos c)
+                                (\pos c _cs -> updatePos pos c)
                                 (\cp -> if f (cpChar cp) then Just cp else Nothing)
 
 char c = satisfy (==c) <?> show [c]
@@ -108,12 +110,7 @@ newline = try (optional $ char '\r') >> char '\n'
 string :: (Stream s m CharPos) => String -> ParsecT s u m [CharPos]
 string s = do
   pos <- getPosition
-  let p@(l,c) = (sourceLine pos, sourceColumn pos)
-  tokens display updatePos (s' l c)
-    where
-      display = map cpChar
-      updatePos pos cs = foldl' updateCharPos pos cs
-      s' l c = zipWith ($) (map CharPos s) (zip (repeat l) [c..])
+  tokens (map cpChar) (foldl' updatePos) (prelex' pos s)
 
 tokenize :: (Stream s m CharPos) => ParsecT s u m [Token]
 tokenize = manyTill p eof
