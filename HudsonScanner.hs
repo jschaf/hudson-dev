@@ -87,12 +87,14 @@ string s = tokens display updatePos (zip s (repeat (0,0))) -- TODO: Hack!
 -- tokenize s = manyTill p eof
 --     where p =     (spaces >> return Junk)
 --               <|> liftA UpperID upperID
+idChar :: (Stream s m CharPos) => ParsecT s u m CharPos
+idChar = alphaNum <|> char '_'
 
 upperID :: (Stream s m CharPos) => ParsecT s u m [CharPos]
-upperID = liftA2 (:) upper $ many alphaNum
+upperID = liftA2 (:) upper $ many idChar
 
 lowerID :: (Stream s m CharPos) => ParsecT s u m [CharPos]
-lowerID = liftA2 (:) lower $ many alphaNum 
+lowerID = liftA2 (:) lower $ many idChar 
 
 hudsonReservedWords = ["and", "assert", "class", "constant", "do", "else",
                        "false", "fun", "function", "if", "inherit", "is", "not",
@@ -100,7 +102,7 @@ hudsonReservedWords = ["and", "assert", "class", "constant", "do", "else",
                        "this", "true", "variable", "while"]
 
 reserved :: (Stream s m CharPos) => ParsecT s u m [CharPos]
-reserved = choice [string r | r <- hudsonReservedWords]
+reserved = choice [try $ string r | r <- hudsonReservedWords]
 
 
 -- tokenP :: Show t => t -> GenParser ((Int,Int),t) () t
@@ -135,3 +137,4 @@ reserved = choice [string r | r <- hudsonReservedWords]
 --                                    Reserved s   | s == name  -> Just ()
 --                                    other        -> Nothing)
 
+test p s = parseTest p (prelex s)
