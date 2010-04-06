@@ -35,21 +35,29 @@ instance Eq CharPos where
 
 type Token  = (Tok, Pos)
 
-data Tok = Number String
-         | Reserved String
-         | UpperID String
-         | LowerID String
-         | Symbol String
-         | ContComment String
-         | Comment String
-         | Newline String
-         | Junk String
+data Tok = Tok Tag String
+           deriving (Show)
+
+data Tag = Number
+         | Reserved
+         | UpperID
+         | LowerID
+         | Symbol
+         | ContComment
+         | Comment
+         | Newline
+         | Junk
            deriving (Show)
 
 tokenizeHudsonFile fname = do
   input <- readFile fname
   let lexed = prelex input
   return (runP tokenize () fname lexed)
+
+removeJunk :: [Token] -> [Token]
+removeJunk = filter f
+    where f ((Tok Junk _), _) = False
+          f _ = True
 
 toString :: [CharPos] -> String
 toString = map cpChar
@@ -114,11 +122,11 @@ tokenize = manyTill p eof
 
 toToken :: (Stream s m CharPos) =>
           ParsecT s u m [CharPos]
-       -> (String -> Tok)
+       -> Tag
        -> ParsecT s u m Token
 toToken p t = do
   xss@(x:xs) <- p
-  let tok = t $ toString xss
+  let tok = Tok t $ toString xss
   return (tok, cpPos x)
 
 spaceJunk :: (Stream s m CharPos) => ParsecT s u m Token
