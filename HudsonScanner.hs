@@ -1,7 +1,12 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 
-module HudsonScanner where
+module HudsonScanner
+    (tokenize,
+     Token,
+     Tok(..),
+     tokenizeHudsonFile
+    ) where
 
 import Control.Monad
 import Control.Applicative (liftA, liftA2)
@@ -12,8 +17,8 @@ import Data.List (mapAccumL, foldl')
 
 import Text.Parsec ((<?>), parseTest)
 import Text.Parsec.Combinator
-import Text.Parsec.Prim -- (ParsecT, Stream, tokenPrim, tokens, skipMany)
-import Text.Parsec.Pos (SourcePos, newPos, updatePosString)
+import Text.Parsec.Prim
+import Text.Parsec.Pos
 
 type Pos = (Int, Int)
 
@@ -25,26 +30,28 @@ instance Eq CharPos where
 
 type Token  = (Tok, Pos)
 
-data Tok = Number Integer
+data Tok = Number String
+         | Reserved String
          | UpperID String
          | LowerID String
-         | Reserved String
          | Symbol String
-         | Comment String
          | ContComment String
-         | Junk
+         | Comment String
+         | Newline String
+         | Junk String
            deriving (Show)
+
+tokenizeHudsonFile fname = do
+  input <- readFile fname
+  let lexed = prelex input
+  return (runP tokenize () fname lexed)
 
 toString :: [CharPos] -> String
 toString = map cpChar
 
--- toToken :: [CharPos] -> Tok -> Token
--- toToken [] _ = error "need CharPos"
--- toToken (c:cs) t = (
-
 -- | Pair each character with its source position.
 prelex :: String -> [CharPos]
-prelex xs = snd $ mapAccumL step (1,0) xs
+prelex xs = snd $ mapAccumL step (1,1) xs
     where
       step (r,c) x | x == '\n' = ((r+1, 0), charInfo)
                    | otherwise = ((r, c+1), charInfo)
@@ -64,8 +71,8 @@ char c = satisfy (==c) <?> show [c]
 space :: (Stream s m CharPos) => ParsecT s u m CharPos
 space = satisfy isSpace <?> "space"
 
-spaces :: (Stream s m CharPos) => ParsecT s u m ()
-spaces = skipMany space <?> "white space"
+spaces :: (Stream s m CharPos) => ParsecT s u m [CharPos]
+spaces = many space <?> "white space"
 
 upper :: (Stream s m CharPos) => ParsecT s u m CharPos
 upper = satisfy (isUpper) <?> "uppercase letter"
@@ -82,18 +89,23 @@ digit = satisfy isDigit <?> "digit"
 anyChar :: (Stream s m CharPos) => ParsecT s u m CharPos
 anyChar = satisfy (const True)
 
+newline :: (Stream s m CharPos) => ParsecT s u m CharPos
+newline = try (optional $ char '\r') >> char '\n'
+
 string :: (Stream s m CharPos) => String -> ParsecT s u m [CharPos]
-string s = tokens display updatePos s' -- TODO: Hack!
-    where display = map cpChar
-          updatePos pos cs = foldl' updateCharPos pos cs
-          s' = [CharPos c (0,0) | c <- s]
+string s = do
+  pos <- getPosition
+  let p@(l,c) = (sourceLine pos, sourceColumn pos)
+  tokens display updatePos (s' l c)
+    where
+      display = map cpChar
+      updatePos pos cs = foldl' updateCharPos pos cs
+      s' l c = zipWith ($) (map CharPos s) (zip (repeat l) [c..])
 
--- TODO: find out how to get CharPos into Tokens
-
--- tokenize :: (Stream s m CharPos) => [CharPos] -> ParsecT s u m [Token]
--- tokenize s = manyTill p eof
---     where p =     (spaces >> return Junk)
---               -- <|> liftA (UpperID . toString) upperID
+tokenize :: (Stream s m CharPos) => ParsecT s u m [Token]
+tokenize = manyTill p eof
+    where p = choice [pNewline, spaceJunk, number, reserved, upperID, lowerID, symbol,
+                      contComment, comment]
 
 toToken :: (Stream s m CharPos) =>
           ParsecT s u m [CharPos]
@@ -103,6 +115,12 @@ toToken p t = do
   xss@(x:xs) <- p
   let tok = t $ toString xss
   return (tok, cpPos x)
+
+spaceJunk :: (Stream s m CharPos) => ParsecT s u m Token
+spaceJunk = toToken spaces Junk
+
+number :: (Stream s m CharPos) => ParsecT s u m Token
+number = toToken (many1 digit) Number
 
 idChar :: (Stream s m CharPos) => ParsecT s u m CharPos
 idChar = alphaNum <|> char '_'
@@ -115,7 +133,6 @@ lowerID :: (Stream s m CharPos) => ParsecT s u m Token
 lowerID = toToken p LowerID
     where p = liftA2 (:) lower $ many idChar
 
-
 hudsonReservedWords = ["and", "assert", "class", "constant", "do", "else",
                        "false", "fun", "function", "if", "inherit", "is", "not",
                        "null", "or", "procedure", "ref", "return", "then",
@@ -125,6 +142,20 @@ reserved :: (Stream s m CharPos) => ParsecT s u m Token
 reserved = toToken p Reserved
     where p = choice [try $ string r | r <- hudsonReservedWords]
 
--- symbol :: (Stream s m CharPos) => ParsecT s u m Token
+hudsonSymbols = ["+", "-", "*", "/", ":=", ":", ",", "=", "(", ")", "?", ">=", ">", "<", "<="]
 
-test p s = parseTest p (prelex s)
+symbol :: (Stream s m CharPos) => ParsecT s u m Token
+symbol = toToken p Symbol
+    where p = choice [try $ string s | s <- hudsonSymbols]
+
+contComment :: (Stream s m CharPos) => ParsecT s u m Token
+contComment = toToken p ContComment
+    where p = string "##" >> manyTill anyChar newline
+
+comment :: (Stream s m CharPos) => ParsecT s u m Token
+comment = toToken p Comment
+    where p = char '#' >> manyTill anyChar newline
+
+pNewline :: (Stream s m CharPos) => ParsecT s u m Token
+pNewline = toToken p Newline
+    where p = liftA (:[]) newline
