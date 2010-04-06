@@ -7,6 +7,7 @@ import Control.Monad
 import Control.Applicative (liftA, liftA2)
 
 import Data.Char
+import Data.Function (on)
 import Data.List (mapAccumL, foldl')
 
 import Text.Parsec ((<?>), parseTest)
@@ -16,42 +17,47 @@ import Text.Parsec.Pos (SourcePos, newPos, updatePosString)
 
 type Pos = (Int, Int)
 
-type CharPos = (Char, Pos)
+data CharPos = CharPos {cpChar :: Char, cpPos :: Pos}
+             deriving (Show)
+
+instance Eq CharPos where
+    (==) = (==) `on` cpChar
 
 type Token  = (Tok, Pos)
 
 data Tok = Number Integer
          | UpperID String
          | LowerID String
-         | Reserved String           
+         | Reserved String
+         | Symbol String
          | Comment String
          | ContComment String
          | Junk
            deriving (Show)
 
-type Parser = Parsec [CharPos] ()
+toString :: [CharPos] -> String
+toString = map cpChar
 
--- instance (Monad m) => Stream [tok] m CharPos where
---     uncons []     = return $ Nothing
---     uncons (t:ts) = return $ Just (t,ts)
---     {-# INLINE uncons #-}
+-- toToken :: [CharPos] -> Tok -> Token
+-- toToken [] _ = error "need CharPos"
+-- toToken (c:cs) t = (
 
 -- | Pair each character with its source position.
-prelex :: String -> [(Char, Pos)]
+prelex :: String -> [CharPos]
 prelex xs = snd $ mapAccumL step (1,0) xs
     where
       step (r,c) x | x == '\n' = ((r+1, 0), charInfo)
                    | otherwise = ((r, c+1), charInfo)
-          where charInfo = (x, (r,c))
+          where charInfo = CharPos x (r,c)
 
 updateCharPos :: SourcePos -> CharPos -> SourcePos
-updateCharPos _s (c, (line, col)) = newPos [c] line col
+updateCharPos _s (CharPos c (line, col)) = newPos [c] line col
 
 -- TODO: This is reinventing the wheel but I don't know a better way.
 satisfy :: (Stream s m CharPos) => (Char -> Bool) -> ParsecT s u m CharPos
-satisfy f           = tokenPrim (\cp -> show [fst cp])
+satisfy f           = tokenPrim (\cp -> show [(cpChar cp)])
                                 (\pos c _cs -> updateCharPos pos c)
-                                (\cp -> if f (fst cp) then Just cp else Nothing)
+                                (\cp -> if f (cpChar cp) then Just cp else Nothing)
 
 char c = satisfy (==c) <?> show [c]
 
@@ -77,64 +83,48 @@ anyChar :: (Stream s m CharPos) => ParsecT s u m CharPos
 anyChar = satisfy (const True)
 
 string :: (Stream s m CharPos) => String -> ParsecT s u m [CharPos]
-string s = tokens display updatePos (zip s (repeat (0,0))) -- TODO: Hack!
-    where display = map fst
+string s = tokens display updatePos s' -- TODO: Hack!
+    where display = map cpChar
           updatePos pos cs = foldl' updateCharPos pos cs
+          s' = [CharPos c (0,0) | c <- s]
 
 -- TODO: find out how to get CharPos into Tokens
 
--- tokenize :: [(Char, Pos)] -> [Token]
+-- tokenize :: (Stream s m CharPos) => [CharPos] -> ParsecT s u m [Token]
 -- tokenize s = manyTill p eof
 --     where p =     (spaces >> return Junk)
---               <|> liftA UpperID upperID
+--               -- <|> liftA (UpperID . toString) upperID
+
+toToken :: (Stream s m CharPos) =>
+          ParsecT s u m [CharPos]
+       -> (String -> Tok)
+       -> ParsecT s u m Token
+toToken p t = do
+  xss@(x:xs) <- p
+  let tok = t $ toString xss
+  return (tok, cpPos x)
+
 idChar :: (Stream s m CharPos) => ParsecT s u m CharPos
 idChar = alphaNum <|> char '_'
 
-upperID :: (Stream s m CharPos) => ParsecT s u m [CharPos]
-upperID = liftA2 (:) upper $ many idChar
+upperID :: (Stream s m CharPos) => ParsecT s u m Token
+upperID = toToken p UpperID
+    where p = liftA2 (:) upper $ many idChar
 
-lowerID :: (Stream s m CharPos) => ParsecT s u m [CharPos]
-lowerID = liftA2 (:) lower $ many idChar 
+lowerID :: (Stream s m CharPos) => ParsecT s u m Token
+lowerID = toToken p LowerID
+    where p = liftA2 (:) lower $ many idChar
+
 
 hudsonReservedWords = ["and", "assert", "class", "constant", "do", "else",
                        "false", "fun", "function", "if", "inherit", "is", "not",
                        "null", "or", "procedure", "ref", "return", "then",
                        "this", "true", "variable", "while"]
 
-reserved :: (Stream s m CharPos) => ParsecT s u m [CharPos]
-reserved = choice [try $ string r | r <- hudsonReservedWords]
+reserved :: (Stream s m CharPos) => ParsecT s u m Token
+reserved = toToken p Reserved
+    where p = choice [try $ string r | r <- hudsonReservedWords]
 
-
--- tokenP :: Show t => t -> GenParser ((Int,Int),t) () t
--- tokenP x
---   = token showTok posFromTok testTok
---   where
---     showTok (pos,t)     = show t
---     posFromTok (pos,t)  = pos
---     testTok (pos,t)     = if (x == t) then Just t else Nothing
-
--- tokSymbols = liftM Symbol $
---              choice [ oneOf "()?-+"
---                     , choice [try $ string ps | ps <- [":=", ">=", "<="]]
---                     , oneOf "<>=:"
-                            
--- type TokParser a = GenParser Token () a
-
--- mytoken :: (Tok -> Maybe a) -> TokParser a
--- mytoken test = token showToken posToken testToken
---     where
---       showToken (pos,tok)   = show tok
---       posToken  (pos,tok)   = pos
---       testToken (pos,tok)   = test tok
-
--- identifier :: TokParser String
--- identifier = mytoken (\tok -> case tok of 
---                                 Identifier name -> Just name
---                                 other           -> Nothing)
-
--- reserved :: String -> TokParser ()
--- reserved name = mytoken (\tok -> case tok of
---                                    Reserved s   | s == name  -> Just ()
---                                    other        -> Nothing)
+-- symbol :: (Stream s m CharPos) => ParsecT s u m Token
 
 test p s = parseTest p (prelex s)
