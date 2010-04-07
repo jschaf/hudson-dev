@@ -7,7 +7,7 @@ module HudsonScanner
      Token,
      tokenizeHudsonFile,
      Tok(..),
-     -- tokenizeHudsonFile
+     Tag(..)
     ) where
 
 import Control.Applicative (liftA, liftA2)
@@ -26,8 +26,6 @@ import Text.Parsec.Pos
 -- Try to not rewrite all the Parsec Char parsers
 --
 -- Find some way to remove the type signatures
-
--- type Pos = (Int, Int)
 
 data CharPos = CharPos {cpChar :: Char, cpPos :: SourcePos}
              deriving (Show)
@@ -49,7 +47,7 @@ data Tag = Number
          | Comment
          | Newline
          | Junk
-           deriving (Show)
+           deriving (Eq, Show)
 
 tokenizeHudsonFile fname = do
   input <- readFile fname
