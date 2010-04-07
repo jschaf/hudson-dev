@@ -89,6 +89,18 @@ parseFile fname = do
     Left err -> print err
     Right xs -> print (removeJunk xs)
 
+
+
+myToken x = token showTok posFromTok testTok
+    where
+      showTok (t , pos) = show t
+      posFromTok (t, pos)  = pos
+      testTok (Tok t s, pos) = if x == t then Just s else Nothing
+
+-- Doesn't work
+numberTag = myToken Number
+
+
 -- parseBlocks :: [Token] -> Parser [Block]
 -- parseBlocks = manyTill parseBlock eof
 
@@ -122,25 +134,19 @@ parseFile fname = do
 --   newline
 --   return $ Assignment v e
 
-myToken x = token showTok posFromTok testTok
-    where
-      showTok (t , pos) = show t
-      posFromTok (t, pos)  = pos
-      testTok (Tok t s, pos) = if x == t then Just s else Nothing
-
 -- spaces :: (Stream s m CharPos) => ParsecT s u m [CharPos]
 
 -- upperID :: (Stream s m Token) => ParsecT s u m String
 -- upperID = myToken UpperID
 
 
-token' x = token showTok posFromTok testTok
-    where
-      showTok (pos,t)     = show t
-      posFromTok (pos,t)  = pos
-      testTok (pos,t)     = if x == t then Just t else Nothing
+-- token' x = token showTok posFromTok testTok
+--     where
+--       showTok (pos,t)     = show t
+--       posFromTok (pos,t)  = pos
+--       testTok (pos,t)     = if x == t then Just t else Nothing
 
-blah = token' "a"
+-- blah = token' "a"
 
 -- parseProcCall = try $ do
 --   p <- varIdentifier
