@@ -7,7 +7,6 @@ module HudsonScanner
      Token,
      tokenizeHudsonFile,
      Tok(..),
-     Tag(..)
     ) where
 
 import Control.Applicative (Applicative, liftA, liftA2)
@@ -16,6 +15,8 @@ import Control.Monad.Identity
 import Data.Char
 import Data.Function (on)
 import Data.List (mapAccumL, foldl')
+
+import qualified Data.Map as Map
 
 import Text.Parsec ((<?>), parseTest, ParseError)
 import Text.Parsec.Combinator
@@ -36,24 +37,34 @@ instance Eq CharPos where
 
 type Token  = (Tok, SourcePos)
 
-data Tok = Tok Tag String
+data Tok = Number_Tok       Integer
+         | Reserved_Tok     Keyword
+         | Operator_Tok     Operator
+         | Separator_Tok    Separator
+         | String_Tok       String
+         | UpperID_Tok      String
+         | LowerID_Tok      String
+         | ObjMemberID_Tok  String 
+         | ContComment_Tok  String
+         | Comment_Tok      String
+         | Newline_Tok
+         | Junk_Tok
            deriving (Show)
 
-data Tag = Number
-         | Reserved
-         | UpperID
-         | LowerID
-         | Symbol
-         | ContComment
-         | LiteralString
-         | Comment
-         | Newline
-         | Junk
-           deriving (Eq, Show)
+data Keyword = And_KW       | Assert_KW   | Class_KW  | Constant_KW | Do_KW
+             | Else_KW      | False_KW    | Fun_KW    | Function_KW | If_KW
+             | Inherit_KW   | Is_KW       | Not_KW    | Null_KW     | Or_KW
+             | Procedure_KW | Ref_KW      | Return_KW | Then_KW     | This_KW
+             | True_KW      | Variable_KW | While_KW
+               deriving (Show)
 
-(<:>) :: (Applicative f) => f a -> f [a] -> f [a]
-(<:>) = liftA2 (:)
-infixr 5 <:>
+data Operator = Plus_Op    | Minus_Op    | Multiply_Op | Divide_Op
+              | Modulus_Op | Equality_Op | TypeTest_Op | Greater_Eq_Op
+              | Greater_Op | Less_Eq_Op  | Less_Op     | Concatenate_Op
+                deriving (Show)
+
+data Separator = Assign_Sep | Colon_Sep | Comma_Sep | LParen_Sep | RParen_Sep
+                 deriving (Show)
 
 tokenizeHudsonFile :: String -> IO (Either ParseError [Token])
 tokenizeHudsonFile fname = do
@@ -63,7 +74,7 @@ tokenizeHudsonFile fname = do
 
 removeJunk :: [Token] -> [Token]
 removeJunk = filter f
-    where f ((Tok Junk _), _) = False
+    where f (Junk_Tok, _) = False
           f _ = True
 
 toString :: [CharPos] -> String
@@ -97,6 +108,8 @@ upper = satisfy isUpper <?> "uppercase letter"
 
 lower = satisfy isLower <?> "lowercase letter"
 
+alpha = satisfy isAlpha <?> "letter"
+
 alphaNum = satisfy isAlphaNum <?> "letter or digit"
 
 digit = satisfy isDigit <?> "digit"
@@ -110,47 +123,75 @@ string s = do
   tokens (map cpChar) (foldl' updatePos) (prelex' pos s)
 
 tokenize = manyTill p eof
-    where p = choice [pNewline, spaceJunk, number, reserved, upperID, lowerID, symbol,
-                      contComment, comment]
+    where p = choice [spaceJunk, identifier, operator, separator, integer]
 
-toToken p t = do
-  xss@(x:xs) <- p
-  let tok = Tok t $ toString xss
-  return (tok, cpPos x)
+spaceJunk = spaces >>= (\(x:xs) -> return (Junk_Tok, cpPos x))
 
-spaceJunk = toToken spaces Junk
+integer = do
+  dss@(d:ds) <- many1 digit
+  let n = toNum dss
+  return (Number_Tok n, cpPos d)
 
-number = toToken (many1 digit) Number
+toNum :: [CharPos] -> Integer
+toNum digits = foldl' convert 0 digits
+    where convert x d = 10*x + toInteger (digitToInt $ cpChar d)
 
 idChar = alphaNum <|> char '_' <|> char '.'
 
-upperID = toToken p UpperID
-    where p = upper <:> many idChar
+hudsonKeywords = [("and", And_KW),           ("assert", Assert_KW),
+                  ("class", Class_KW),       ("constant", Constant_KW),
+                  ("do", Do_KW),             ("else", Else_KW),
+                  ("false", False_KW),       ("fun", Fun_KW),
+                  ("function", Function_KW), ("if", If_KW),
+                  ("inherit", Inherit_KW),   ("is", Is_KW),
+                  ("not", Not_KW),           ("null", Null_KW),
+                  ("or", Or_KW),             ("procedure", Procedure_KW),
+                  ("ref", Ref_KW),           ("return", Return_KW),
+                  ("then", Then_KW),         ("this", This_KW),
+                  ("true", True_KW),         ("variable", Variable_KW),
+                  ("while", While_KW)]
 
-lowerID = toToken p LowerID
-    where p =     char '.' <:> lower <:> many idChar
-              <|> lower <:> many idChar
+keywordMap = Map.fromList hudsonKeywords
 
 
-hudsonReservedWords = ["and", "assert", "class", "constant", "do", "else",
-                       "false", "fun", "function", "if", "inherit", "is", "not",
-                       "null", "or", "procedure", "ref", "return", "then",
-                       "this", "true", "variable", "while"]
+(<:>) :: (Applicative f) => f a -> f [a] -> f [a]
+(<:>) = liftA2 (:)
+infixr 5 <:>
 
-reserved = toToken p Reserved
-    where p = choice [try $ string r | r <- hudsonReservedWords]
+identifier = do
+  xs@(s:ss) <- alpha <:> many idChar
+  let tok = maybe (toID xs) Reserved_Tok (Map.lookup (toString xs) keywordMap)
+  return (tok, cpPos s)
 
-hudsonSymbols = ["+", "-", "*", "/", "%", ":=", ":", ",", "=", "(", ")", "?", ">=",
-                 ">", "<", "<=", "&", "'", "\""]
+    where
+      toID ts@(t:tt) | isUpper (cpChar t) = UpperID_Tok $ toString ts
+                     | isLower (cpChar t) = LowerID_Tok $ toString ts
+                     | otherwise          = error "Need upper or lowercase"
 
-symbol = toToken p Symbol
-    where p = choice [try $ string s | s <- hudsonSymbols]
+hudsonOperators = [("+", Plus_Op),     ("-",  Minus_Op),
+                   ("*", Multiply_Op), ("/",  Divide_Op),
+                   ("%", Modulus_Op),  ("=",  Equality_Op),
+                   ("?", TypeTest_Op), (">=", Greater_Eq_Op),
+                   (">", Greater_Op),  ("<=", Less_Eq_Op),
+                   ("<", Less_Op),     ("&",  Concatenate_Op)]
 
-contComment = toToken p ContComment
-    where p = try (string "##") >> manyTill anyChar newline
+tryOperator (s, o) = do (x:xs) <- try (string s)
+                        return (Operator_Tok o, cpPos x)
 
-comment = toToken p Comment
-    where p = char '#' >> manyTill anyChar newline
+operator = msum $ map tryOperator hudsonOperators
+  
 
-pNewline = toToken p Newline
-    where p = newline <:> return []
+hudsonSeparators = [(":=", Assign_Sep), (":", Colon_Sep),
+                    (",", Comma_Sep),   ("(", LParen_Sep),
+                    (")", RParen_Sep)]
+
+trySeparator (s, o) = do (x:xs) <- try (string s)
+                         return (Separator_Tok o, cpPos x)
+
+separator = msum $ map trySeparator hudsonSeparators
+
+-- contComment = liftA ContComment_Tok (try (string "##") >> spaces >> manyTill anyChar newline)
+
+-- comment = liftA Comment_Tok (char '#' >> manyTill anyChar newline)
+
+-- pNewline = newline <:> return [] >> return Newline_Tok

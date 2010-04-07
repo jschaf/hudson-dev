@@ -12,6 +12,7 @@ import Text.Parsec ((<?>), (<|>))
 import Text.Parsec.Combinator
 import Text.Parsec.Prim
 import Text.Parsec.Pos
+import Text.Parsec.String
 import Text.Printf
 
 data Block = BlockStmt Stmt
