@@ -27,7 +27,7 @@ import Text.Parsec.Pos
 --
 -- Try to not rewrite all the Parsec Char parsers
 --
--- Find some way to remove the type signatures
+-- Recoginize string literals. 
 
 data CharPos = CharPos {cpChar :: Char, cpPos :: SourcePos}
              deriving (Show)
@@ -84,6 +84,8 @@ toString = map cpChar
 prelex :: String -> String -> [CharPos]
 prelex xs sname = prelex' (initialPos sname) xs
 
+-- | Pair each character with a source position beginning with the
+-- supplied intial position.
 prelex' initial xs = snd $ mapAccumL step initial xs
     where
       step srcPos c = (updatePosChar srcPos c, CharPos c srcPos)
@@ -98,32 +100,24 @@ satisfy f = tokenPrim (\cp -> show [(cpChar cp)])
                       (\pos c _cs -> updatePos pos c)
                       (\cp -> if f (cpChar cp) then Just cp else Nothing)
 
-char c = satisfy (==c) <?> show [c]
-
-space = satisfy isSpace <?> "space"
-
-spaces = many space <?> "white space"
-
-upper = satisfy isUpper <?> "uppercase letter"
-
-lower = satisfy isLower <?> "lowercase letter"
-
-alpha = satisfy isAlpha <?> "letter"
-
+char c   = satisfy (==c) <?> show [c]
+space    = satisfy isSpace <?> "space"
+spaces   = many1 space <?> "white space"
+upper    = satisfy isUpper <?> "uppercase letter"
+lower    = satisfy isLower <?> "lowercase letter"
+alpha    = satisfy isAlpha <?> "letter"
 alphaNum = satisfy isAlphaNum <?> "letter or digit"
-
-digit = satisfy isDigit <?> "digit"
-
-anyChar = satisfy (const True)
-
-newline = optional (char '\r') >> char '\n'
+digit    = satisfy isDigit <?> "digit"
+anyChar  = satisfy (const True)
+newline  = optional (char '\r') >> char '\n'
 
 string s = do
   pos <- getPosition
   tokens (map cpChar) (foldl' updatePos) (prelex' pos s)
 
 tokenize = manyTill p eof
-    where p = choice [spaceJunk, identifier, operator, separator, integer]
+    where p = choice [spaceJunk, newline_tok, identifier, operator, separator,
+                      integer, contComment, comment]
 
 spaceJunk = spaces >>= (\(x:xs) -> return (Junk_Tok, cpPos x))
 
@@ -136,7 +130,13 @@ toNum :: [CharPos] -> Integer
 toNum digits = foldl' convert 0 digits
     where convert x d = 10*x + toInteger (digitToInt $ cpChar d)
 
-idChar = alphaNum <|> char '_' <|> char '.'
+-- | List cons for applicative functors.
+(<:>) :: (Applicative f) => f a -> f [a] -> f [a]
+(<:>) = liftA2 (:)
+infixr 5 <:>
+
+mkToken p f = do xss@(x:xs) <- p
+                 return (f xss, cpPos x)
 
 hudsonKeywords = [("and", And_KW),           ("assert", Assert_KW),
                   ("class", Class_KW),       ("constant", Constant_KW),
@@ -153,20 +153,21 @@ hudsonKeywords = [("and", And_KW),           ("assert", Assert_KW),
 
 keywordMap = Map.fromList hudsonKeywords
 
+objMember = char '.' <:> lower <:> many idChar <?> "class method or variable name"
 
-(<:>) :: (Applicative f) => f a -> f [a] -> f [a]
-(<:>) = liftA2 (:)
-infixr 5 <:>
+ident = alpha <:> many idChar
 
-identifier = do
-  xs@(s:ss) <- alpha <:> many idChar
-  let tok = maybe (toID xs) Reserved_Tok (Map.lookup (toString xs) keywordMap)
-  return (tok, cpPos s)
+idChar = alphaNum <|> char '_' <|> char '.'
 
-    where
-      toID ts@(t:tt) | isUpper (cpChar t) = UpperID_Tok $ toString ts
-                     | isLower (cpChar t) = LowerID_Tok $ toString ts
-                     | otherwise          = error "Need upper or lowercase"
+identifier = mkToken (objMember <|> ident) toTok
+    where 
+      toTok xs = maybe (toID xs) Reserved_Tok (Map.lookup (toString xs) keywordMap)
+
+      toID ts@(t:_) | isUpper (cpChar t) = UpperID_Tok $ toString ts
+                    | isLower (cpChar t) = LowerID_Tok $ toString ts
+                    | cpChar t == '.'    = ObjMemberID_Tok $ toString ts
+                    | otherwise          = error "Need upper or lowercase"
+
 
 hudsonOperators = [("+", Plus_Op),     ("-",  Minus_Op),
                    ("*", Multiply_Op), ("/",  Divide_Op),
@@ -175,11 +176,11 @@ hudsonOperators = [("+", Plus_Op),     ("-",  Minus_Op),
                    (">", Greater_Op),  ("<=", Less_Eq_Op),
                    ("<", Less_Op),     ("&",  Concatenate_Op)]
 
+-- TODO: Generalize this, possibly using mkToken
 tryOperator (s, o) = do (x:xs) <- try (string s)
                         return (Operator_Tok o, cpPos x)
 
 operator = msum $ map tryOperator hudsonOperators
-  
 
 hudsonSeparators = [(":=", Assign_Sep), (":", Colon_Sep),
                     (",", Comma_Sep),   ("(", LParen_Sep),
@@ -190,8 +191,13 @@ trySeparator (s, o) = do (x:xs) <- try (string s)
 
 separator = msum $ map trySeparator hudsonSeparators
 
--- contComment = liftA ContComment_Tok (try (string "##") >> spaces >> manyTill anyChar newline)
+contComment = mkToken (try (string "##") >> manyTill anyChar newline)
+                      (ContComment_Tok . toString)
 
--- comment = liftA Comment_Tok (char '#' >> manyTill anyChar newline)
+comment = mkToken (char '#' >> manyTill anyChar newline)
+                  (Comment_Tok . toString)
 
--- pNewline = newline <:> return [] >> return Newline_Tok
+newline_tok = mkToken (newline <:> return []) (return Newline_Tok)
+
+-- string_literal = mkToken pString (String_Tok . toString)
+--     where pString = 
