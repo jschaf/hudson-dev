@@ -62,7 +62,7 @@ data Keyword = AndKW       | AssertKW   | ClassKW  | ConstantKW | DoKW
 
 data Operator = PlusOp    | MinusOp    | MultiplyOp | DivideOp
               | ModulusOp | EqualityOp | TypeTestOp | GreaterEqOp
-              | GreaterOp | LessEqOp  | LessOp     | ConcatenateOp
+              | GreaterOp | LessEqOp   | LessOp     | ConcatenateOp
                 deriving (Show)
 
 data Separator = AssignSep | ColonSep | CommaSep | LParenSep | RParenSep
@@ -78,6 +78,13 @@ removeJunk :: [Token] -> [Token]
 removeJunk = filter f
     where f (JunkTok, _) = False
           f _ = True
+
+removeUnecessary = filter f
+    where f (JunkTok, _) = False
+          f (NewlineTok, _) = False
+          f (CommentTok _, _) = False
+          f _ = True
+
 
 toString :: [CharPos] -> String
 toString = map cpChar
