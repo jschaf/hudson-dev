@@ -39,33 +39,33 @@ instance Ord CharPos where
 
 type Token  = (Tok, SourcePos)
 
-data Tok = Number_Tok       Integer
-         | Reserved_Tok     Keyword
-         | Operator_Tok     Operator
-         | Separator_Tok    Separator
-         | String_Tok       String
-         | UpperID_Tok      String
-         | LowerID_Tok      String
-         | ObjMemberID_Tok  String 
-         | ContComment_Tok  String
-         | Comment_Tok      String
-         | Newline_Tok
-         | Junk_Tok
+data Tok = NumberTok       Integer
+         | ReservedTok     Keyword
+         | OperatorTok     Operator
+         | SeparatorTok    Separator
+         | StringTok       String
+         | UpperIDTok      String
+         | LowerIDTok      String
+         | ObjMemberIDTok  String 
+         | ContCommentTok  String
+         | CommentTok      String
+         | NewlineTok
+         | JunkTok
            deriving (Show)
 
-data Keyword = And_KW       | Assert_KW   | Class_KW  | Constant_KW | Do_KW
-             | Else_KW      | False_KW    | Fun_KW    | Function_KW | If_KW
-             | Inherit_KW   | Is_KW       | Not_KW    | Null_KW     | Or_KW
-             | Procedure_KW | Ref_KW      | Return_KW | Then_KW     | This_KW
-             | True_KW      | Variable_KW | While_KW
+data Keyword = AndKW       | AssertKW   | ClassKW  | ConstantKW | DoKW
+             | ElseKW      | FalseKW    | FunKW    | FunctionKW | IfKW
+             | InheritKW   | IsKW       | NotKW    | NullKW     | OrKW
+             | ProcedureKW | RefKW      | ReturnKW | ThenKW     | ThisKW
+             | TrueKW      | VariableKW | WhileKW
                deriving (Show)
 
-data Operator = Plus_Op    | Minus_Op    | Multiply_Op | Divide_Op
-              | Modulus_Op | Equality_Op | TypeTest_Op | Greater_Eq_Op
-              | Greater_Op | Less_Eq_Op  | Less_Op     | Concatenate_Op
+data Operator = PlusOp    | MinusOp    | MultiplyOp | DivideOp
+              | ModulusOp | EqualityOp | TypeTestOp | GreaterEqOp
+              | GreaterOp | LessEqOp  | LessOp     | ConcatenateOp
                 deriving (Show)
 
-data Separator = Assign_Sep | Colon_Sep | Comma_Sep | LParen_Sep | RParen_Sep
+data Separator = AssignSep | ColonSep | CommaSep | LParenSep | RParenSep
                  deriving (Show)
 
 tokenizeHudsonFile :: String -> IO (Either ParseError [Token])
@@ -76,7 +76,7 @@ tokenizeHudsonFile fname = do
 
 removeJunk :: [Token] -> [Token]
 removeJunk = filter f
-    where f (Junk_Tok, _) = False
+    where f (JunkTok, _) = False
           f _ = True
 
 toString :: [CharPos] -> String
@@ -99,7 +99,7 @@ updatePos srcPos (CharPos c pos) = updatePosChar srcPos c
 satisfy :: (Stream [CharPos] Identity CharPos) => (Char -> Bool)
           -> ParsecT [CharPos] () Identity CharPos
 satisfy f = tokenPrim (\cp -> show [(cpChar cp)])
-                      (\pos c _cs -> updatePos pos c)
+                      (\pos c cs -> updatePos pos c)
                       (\cp -> if f (cpChar cp) then Just cp else Nothing)
 
 char c   = satisfy (==c) <?> show [c]
@@ -118,15 +118,15 @@ string s = do
   tokens (map cpChar) (foldl' updatePos) (prelex' pos s)
 
 tokenize = manyTill p eof
-    where p = choice [spaceJunk, newline_tok, identifier, operator, separator,
+    where p = choice [spaceJunk, newlinetok, identifier, operator, separator,
                       integer, stringLiteral, contComment, comment]
 
-spaceJunk = spaces >>= (\(x:xs) -> return (Junk_Tok, cpPos x))
+spaceJunk = spaces >>= (\(x:xs) -> return (JunkTok, cpPos x))
 
 integer = do
   dss@(d:ds) <- many1 digit
   let n = toNum dss
-  return (Number_Tok n, cpPos d)
+  return (NumberTok n, cpPos d)
 
 toNum :: [CharPos] -> Integer
 toNum digits = foldl' convert 0 digits
@@ -146,18 +146,18 @@ mkToken' p f d = do pos <- getPosition
                       then return (d, pos)
                       else return (f xs, cpPos $ head xs)
 
-hudsonKeywords = [("and", And_KW),           ("assert", Assert_KW),
-                  ("class", Class_KW),       ("constant", Constant_KW),
-                  ("do", Do_KW),             ("else", Else_KW),
-                  ("false", False_KW),       ("fun", Fun_KW),
-                  ("function", Function_KW), ("if", If_KW),
-                  ("inherit", Inherit_KW),   ("is", Is_KW),
-                  ("not", Not_KW),           ("null", Null_KW),
-                  ("or", Or_KW),             ("procedure", Procedure_KW),
-                  ("ref", Ref_KW),           ("return", Return_KW),
-                  ("then", Then_KW),         ("this", This_KW),
-                  ("true", True_KW),         ("variable", Variable_KW),
-                  ("while", While_KW)]
+hudsonKeywords = [("and", AndKW),           ("assert", AssertKW),
+                  ("class", ClassKW),       ("constant", ConstantKW),
+                  ("do", DoKW),             ("else", ElseKW),
+                  ("false", FalseKW),       ("fun", FunKW),
+                  ("function", FunctionKW), ("if", IfKW),
+                  ("inherit", InheritKW),   ("is", IsKW),
+                  ("not", NotKW),           ("null", NullKW),
+                  ("or", OrKW),             ("procedure", ProcedureKW),
+                  ("ref", RefKW),           ("return", ReturnKW),
+                  ("then", ThenKW),         ("this", ThisKW),
+                  ("true", TrueKW),         ("variable", VariableKW),
+                  ("while", WhileKW)]
 
 keywordMap = Map.fromList hudsonKeywords
 
@@ -169,45 +169,45 @@ idChar = alphaNum <|> char '_' <|> char '.'
 
 identifier = mkToken (objMember <|> ident) toTok
     where 
-      toTok xs = maybe (toID xs) Reserved_Tok (Map.lookup (toString xs) keywordMap)
+      toTok xs = maybe (toID xs) ReservedTok (Map.lookup (toString xs) keywordMap)
 
-      toID ts@(t:_) | isUpper (cpChar t) = UpperID_Tok $ toString ts
-                    | isLower (cpChar t) = LowerID_Tok $ toString ts
-                    | cpChar t == '.'    = ObjMemberID_Tok $ toString ts
+      toID ts@(t:_) | isUpper (cpChar t) = UpperIDTok $ toString ts
+                    | isLower (cpChar t) = LowerIDTok $ toString ts
+                    | cpChar t == '.'    = ObjMemberIDTok $ toString ts
                     | otherwise          = error "Need upper or lowercase"
 
 
-hudsonOperators = [("+", Plus_Op),     ("-",  Minus_Op),
-                   ("*", Multiply_Op), ("/",  Divide_Op),
-                   ("%", Modulus_Op),  ("=",  Equality_Op),
-                   ("?", TypeTest_Op), (">=", Greater_Eq_Op),
-                   (">", Greater_Op),  ("<=", Less_Eq_Op),
-                   ("<", Less_Op),     ("&",  Concatenate_Op)]
+hudsonOperators = [("+", PlusOp),     ("-",  MinusOp),
+                   ("*", MultiplyOp), ("/",  DivideOp),
+                   ("%", ModulusOp),  ("=",  EqualityOp),
+                   ("?", TypeTestOp), (">=", GreaterEqOp),
+                   (">", GreaterOp),  ("<=", LessEqOp),
+                   ("<", LessOp),     ("&",  ConcatenateOp)]
 
 -- TODO: Generalize this, possibly using mkToken
 tryOperator (s, o) = do (x:_) <- try (string s)
-                        return (Operator_Tok o, cpPos x)
+                        return (OperatorTok o, cpPos x)
 
 operator = msum $ map tryOperator hudsonOperators
 
-hudsonSeparators = [(":=", Assign_Sep), (":", Colon_Sep),
-                    (",", Comma_Sep),   ("(", LParen_Sep),
-                    (")", RParen_Sep)]
+hudsonSeparators = [(":=", AssignSep), (":", ColonSep),
+                    (",", CommaSep),   ("(", LParenSep),
+                    (")", RParenSep)]
 
 trySeparator (s, o) = do (x:_) <- try (string s)
-                         return (Separator_Tok o, cpPos x)
+                         return (SeparatorTok o, cpPos x)
 
 separator = msum $ map trySeparator hudsonSeparators
 
 contComment = mkToken' (try (string "##") >> manyTill anyChar newline)
-                       (ContComment_Tok . toString)
-                       (ContComment_Tok "")
+                       (ContCommentTok . toString)
+                       (ContCommentTok "")
 
 comment = mkToken' (char '#' >> manyTill anyChar newline)
-                   (Comment_Tok . toString)
-                   (Comment_Tok "")
+                   (CommentTok . toString)
+                   (CommentTok "")
 
-newline_tok = mkToken newline (return Newline_Tok)
+newlinetok = mkToken newline (return NewlineTok)
 
 -- TODO: This is messy because I couldn't find a clean way to convert
 -- chars from the escMap into CharPos.  
@@ -217,7 +217,7 @@ stringLiteral = do pos <- getPosition
                    ss@(s:_) <- between (char '"')
                                        (char '"' <?> "end of string")
                                        (many $ stringChar pos)
-                   return (String_Tok $ toString ss, decColumn $ cpPos s)
+                   return (StringTok $ toString ss, decColumn $ cpPos s)
              <?> "literal string"
     where 
       -- | Decrease the column number to account for the opening
