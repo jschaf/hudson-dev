@@ -1,8 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+
 module HudsonScanner
     (removeJunk,
+     removeUnnecessary
      tokenize,
      Token,
      tokenizeHudsonFile,
@@ -79,7 +79,7 @@ removeJunk = filter f
     where f (JunkTok, _) = False
           f _ = True
 
-removeUnecessary = filter f
+removeUnnecessary = filter f
     where f (JunkTok, _) = False
           f (NewlineTok, _) = False
           f (CommentTok _, _) = False
