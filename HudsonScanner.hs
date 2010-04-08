@@ -27,13 +27,15 @@ import Text.Parsec.Pos
 --
 -- Try to not rewrite all the Parsec Char parsers
 --
--- Recoginize string literals. 
 
 data CharPos = CharPos {cpChar :: Char, cpPos :: SourcePos}
              deriving (Show)
 
 instance Eq CharPos where
     (==) = (==) `on` cpChar
+
+instance Ord CharPos where
+    compare = compare `on` cpChar
 
 type Token  = (Tok, SourcePos)
 
@@ -109,7 +111,7 @@ alpha    = satisfy isAlpha <?> "letter"
 alphaNum = satisfy isAlphaNum <?> "letter or digit"
 digit    = satisfy isDigit <?> "digit"
 anyChar  = satisfy (const True)
-newline  = optional (char '\r') >> char '\n'
+newline  = optional (char '\r') >> string "\n"
 
 string s = do
   pos <- getPosition
@@ -117,7 +119,7 @@ string s = do
 
 tokenize = manyTill p eof
     where p = choice [spaceJunk, newline_tok, identifier, operator, separator,
-                      integer, contComment, comment]
+                      integer, stringLiteral, contComment, comment]
 
 spaceJunk = spaces >>= (\(x:xs) -> return (Junk_Tok, cpPos x))
 
@@ -137,6 +139,12 @@ infixr 5 <:>
 
 mkToken p f = do xss@(x:xs) <- p
                  return (f xss, cpPos x)
+
+mkToken' p f d = do pos <- getPosition
+                    xs <- p
+                    if null xs
+                      then return (d, pos)
+                      else return (f xs, cpPos $ head xs)
 
 hudsonKeywords = [("and", And_KW),           ("assert", Assert_KW),
                   ("class", Class_KW),       ("constant", Constant_KW),
@@ -177,7 +185,7 @@ hudsonOperators = [("+", Plus_Op),     ("-",  Minus_Op),
                    ("<", Less_Op),     ("&",  Concatenate_Op)]
 
 -- TODO: Generalize this, possibly using mkToken
-tryOperator (s, o) = do (x:xs) <- try (string s)
+tryOperator (s, o) = do (x:_) <- try (string s)
                         return (Operator_Tok o, cpPos x)
 
 operator = msum $ map tryOperator hudsonOperators
@@ -186,18 +194,59 @@ hudsonSeparators = [(":=", Assign_Sep), (":", Colon_Sep),
                     (",", Comma_Sep),   ("(", LParen_Sep),
                     (")", RParen_Sep)]
 
-trySeparator (s, o) = do (x:xs) <- try (string s)
+trySeparator (s, o) = do (x:_) <- try (string s)
                          return (Separator_Tok o, cpPos x)
 
 separator = msum $ map trySeparator hudsonSeparators
 
-contComment = mkToken (try (string "##") >> manyTill anyChar newline)
-                      (ContComment_Tok . toString)
+contComment = mkToken' (try (string "##") >> manyTill anyChar newline)
+                       (ContComment_Tok . toString)
+                       (ContComment_Tok "")
 
-comment = mkToken (char '#' >> manyTill anyChar newline)
-                  (Comment_Tok . toString)
+comment = mkToken' (char '#' >> manyTill anyChar newline)
+                   (Comment_Tok . toString)
+                   (Comment_Tok "")
 
-newline_tok = mkToken (newline <:> return []) (return Newline_Tok)
+newline_tok = mkToken newline (return Newline_Tok)
 
--- string_literal = mkToken pString (String_Tok . toString)
---     where pString = 
+-- TODO: This is messy because I couldn't find a clean way to convert
+-- chars from the escMap into CharPos.  
+
+-- | Parse a string literal (i.e. wrapped in quotations)
+stringLiteral = do pos <- getPosition
+                   ss@(s:_) <- between (char '"')
+                                       (char '"' <?> "end of string")
+                                       (many $ stringChar pos)
+                   return (String_Tok $ toString ss, decColumn $ cpPos s)
+             <?> "literal string"
+    where 
+      -- | Decrease the column number to account for the opening
+      -- quotation mark which is skipped.
+      decColumn s = newPos (sourceName s) (sourceLine s) (sourceColumn s - 1)
+
+      stringChar pos = stringLetter <|> stringEscape pos <?> "string character"
+
+      -- | Letters that aren't escape characters or special codes.
+      stringLetter = satisfy (\c -> (c /= '"') && (c /= '\\') && (c > '\026'))
+      
+      -- | Parse a backslash and return the escaped character.
+      stringEscape :: SourcePos -> CharPosParser CharPos
+      stringEscape pos = char '\\' >> charEsc pos
+      
+      -- | Return a matched escape character.
+      charEsc :: SourcePos -> CharPosParser CharPos
+      charEsc pos = choice (map parseEsc (escMap pos)) <?> "escape code"
+      
+      -- | Parse the character in an escape code and return its full
+      -- representation.
+      parseEsc :: (Char, CharPos) -> CharPosParser CharPos
+      parseEsc (c,code) = char c >> return code
+      
+      -- | A map from escape characters to full escape codes.
+      escMap :: SourcePos -> [(Char, CharPos)]
+      escMap pos = zip "abfnrtv\\\"\'"
+                       (map (flip CharPos pos) "\a\b\f\n\r\t\v\\\"\'")
+
+type CharPosParser t = Parsec [CharPos] () t
+
+test p s = parseTest p (prelex s "")
