@@ -1,12 +1,16 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 module HudsonScanner
-    (removeJunk,
-     removeUnnecessary,
-     tokenize,
-     Token,
-     tokenizeHudsonFile,
-     Tok(..),
+    ( removeJunk
+    , removeUnnecessary
+    , tokenize
+    , Token
+    , tokenizeHudsonFile
+    , tokenizeString
+    , Tok(..)
+    , Separator(..)
+    , Operator(..)
+    , Keyword(..)
     ) where
 
 import Control.Monad (msum, liftM)
@@ -84,7 +88,7 @@ removeJunk = filter f
     where f (JunkTok, _) = False
           f _ = True
 
--- | Remove Junk, newline and comment tokens.
+-- | Remove Junk and comment tokens.
 removeUnnecessary = filter f
     where f (JunkTok, _) = False
           f (CommentTok _, _) = False
@@ -121,7 +125,8 @@ offside ts = off (head ts) [] ts
           | otherwise          = x:(off acc stk xs)
 
       outdents :: Token -> [Int] -> [Token]
-      outdents tok stk = replicate (length $ takeWhile (> col tok) stk) (OutdentTok, pos tok)
+      outdents tok stk = replicate (length $ takeWhile (> col tok) stk)
+                                   (OutdentTok, pos tok)
       col = sourceColumn . pos
       line = sourceLine . pos
       pos = snd
@@ -306,3 +311,5 @@ test p s = parseTest p (prelex s "")
 
 example = liftM fromRight $ tokenizeHudsonFile "test1.hud"
     where fromRight (Right a)  = a
+
+tokenizeString s = removeUnnecessary <$> parse tokenize "" (prelex s "")
