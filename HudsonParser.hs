@@ -91,16 +91,48 @@ parseFile fname = do
     Right xs -> print (removeJunk xs)
 
 
-
-myToken x = token showTok posFromTok testTok
+tokenP :: (Stream [Token] Identity Token) => Token -> Parsec [Token] () Token
+tokenP x = token showTok posFromTok testTok
     where
+      showTok :: Token -> String
       showTok (t , pos) = show t
+      posFromTok :: Token -> SourcePos
       posFromTok (t, pos)  = pos
-      testTok (Tok t s, pos) = if x == t then Just s else Nothing
+      testTok :: Token -> Maybe Token
+      testTok tok = if equal x tok then Just tok else Nothing
 
--- Doesn't work
-numberTag = myToken Number
 
+equal (NumberTok _, _)       (NumberTok _, _)      = True
+equal (ReservedTok s, _)     (ReservedTok s', _)    = s == s'
+equal (OperatorTok o, _)     (OperatorTok o', _)    = o == o'
+equal (SeparatorTok s, _)    (SeparatorTok s', _)   = s == s'
+equal (StringTok _, _)       (StringTok _, _)      = True
+equal (UpperIDTok _, _)      (UpperIDTok _, _)     = True
+equal (LowerIDTok _, _)      (LowerIDTok _, _)     = True
+equal (ObjMemberIDTok _, _)  (ObjMemberIDTok _, _) = True
+equal (ContCommentTok _, _)  (ContCommentTok _, _) = True
+equal (CommentTok _, _)      (CommentTok _, _)     = True
+equal (IndentTok, _)         (IndentTok, _)        = True
+equal (OutdentTok, _)        (OutdentTok, _)       = True
+equal (NewlineTok, _)        (NewlineTok, _)       = True
+equal (JunkTok, _)           (JunkTok, _)          = True
+equal _ _                                          = False
+
+emptyPos = newPos "" 0 0
+withEmpty = flip (,) emptyPos
+numberTag = tokenP . withEmpty $ NumberTok 0
+reserved s = tokenP . withEmpty $ ReservedTok s
+operator o = tokenP . withEmpty $ OperatorTok o
+string = tokenP . withEmpty $ StringTok "" 
+upperID = tokenP . withEmpty $ UpperIDTok "" 
+lowerID = tokenP . withEmpty $ LowerIDTok "" 
+objMemberID = tokenP . withEmpty $ ObjMemberIDTok "" 
+contComment = tokenP . withEmpty $ ContCommentTok "" 
+comment = tokenP . withEmpty $ CommentTok "" 
+indent = tokenP . withEmpty $ IndentTok
+outdent = tokenP . withEmpty $ OutdentTok
+newline = tokenP . withEmpty $ NewlineTok
+junk = tokenP . withEmpty $ JunkTok
 
 -- parseBlocks :: [Token] -> Parser [Block]
 -- parseBlocks = manyTill parseBlock eof
@@ -112,8 +144,8 @@ numberTag = myToken Number
 
 -- parseStmt :: Parser Stmt
 -- parseStmt = parseAssign
-        -- <|> parseProcCall
-        -- <|> parseIf
+--         <|> parseProcCall
+--         <|> parseIf
         -- <|> parseWhile
         -- <|> parseReturn
         -- <|> parseAssert
