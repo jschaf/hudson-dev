@@ -48,7 +48,7 @@ data Tok = NumberTok       Integer   -- ^ a literal integer
          | StringTok       String    -- ^ a literal string
          | UpperIDTok      String    -- ^ an uppercased ID
          | LowerIDTok      String    -- ^ a lowercased ID
-         | ObjMemberIDTok  String    -- ^ an object member 
+         | ObjMemberIDTok  String    -- ^ an object member
          | ContCommentTok  String    -- ^ a continuation comment
          | CommentTok      String    -- ^ a comment
          | IndentTok                 -- ^ an indent token
@@ -62,15 +62,15 @@ data Keyword = AndKW       | AssertKW   | ClassKW  | ConstantKW | DoKW
              | InheritKW   | IsKW       | NotKW    | NullKW     | OrKW
              | ProcedureKW | RefKW      | ReturnKW | ThenKW     | ThisKW
              | TrueKW      | VariableKW | WhileKW
-               deriving (Show)
+               deriving (Eq, Show)
 
 data Operator = PlusOp    | MinusOp    | MultiplyOp | DivideOp
               | ModulusOp | EqualityOp | TypeTestOp | GreaterEqOp
               | GreaterOp | LessEqOp   | LessOp     | ConcatenateOp
-                deriving (Show)
+                deriving (Eq, Show)
 
 data Separator = AssignSep | ColonSep | CommaSep | LParenSep | RParenSep
-                 deriving (Show)
+                 deriving (Eq, Show)
 
 tokenizeHudsonFile :: String -> IO (Either ParseError [Token])
 tokenizeHudsonFile fname = do
@@ -96,7 +96,7 @@ debugView = map display
 
 -- | Insert Indent and Outdent tokens into the list.  Like foldr, but
 -- tracks the last indented node that wasn't a newline or continuation
--- comment.  
+-- comment.
 offside :: [Token] -> [Token]
 offside [] = []
 offside ts = off (head ts) [] ts
@@ -119,7 +119,7 @@ offside ts = off (head ts) [] ts
                                  x : (off x (dropWhile (>col x) stk) xs)
           | col x > col acc    = (IndentTok, pos x) : x : (off x (col x : stk) xs)
           | otherwise          = x:(off acc stk xs)
-                                 
+
       outdents :: Token -> [Int] -> [Token]
       outdents tok stk = replicate (length $ takeWhile (> col tok) stk) (OutdentTok, pos tok)
       col = sourceColumn . pos
@@ -218,7 +218,7 @@ idChar = alphaNum <|> char '_' <|> char '.'
 -- | Parse an identifier and classify it as reserved word, lowercase
 -- identifier or uppercase identifier.
 identifier = mkToken (objMember <|> ident) toTok
-    where 
+    where
       toTok xs = maybe (toID xs) ReservedTok (Map.lookup (toString xs) keywordMap)
 
       toID ts@(t:_) | isUpper (cpChar t) = UpperIDTok $ toString ts
@@ -263,7 +263,7 @@ comment = mkToken' (char '#' >> manyTill anyChar newline)
 newlinetok = mkToken newline (return NewlineTok)
 
 -- TODO: This is messy because I couldn't find a clean way to convert
--- chars from the escMap into CharPos.  
+-- chars from the escMap into CharPos.
 
 -- | Parse a string literal (i.e. wrapped in quotations)
 stringLiteral = do pos <- getPosition
@@ -272,7 +272,7 @@ stringLiteral = do pos <- getPosition
                                        (many $ stringChar pos)
                    return (StringTok $ toString ss, decColumn $ cpPos s)
              <?> "literal string"
-    where 
+    where
       -- | Decrease the column number to account for the opening
       -- quotation mark which is skipped.
       decColumn s = newPos (sourceName s) (sourceLine s) (sourceColumn s - 1)
@@ -281,20 +281,20 @@ stringLiteral = do pos <- getPosition
 
       -- | Letters that aren't escape characters or special codes.
       stringLetter = satisfy (\c -> (c /= '"') && (c /= '\\') && (c > '\026'))
-      
+
       -- | Parse a backslash and return the escaped character.
       stringEscape :: SourcePos -> CharPosParser CharPos
       stringEscape pos = char '\\' >> charEsc pos
-      
+
       -- | Return a matched escape character.
       charEsc :: SourcePos -> CharPosParser CharPos
       charEsc pos = choice (map parseEsc (escMap pos)) <?> "escape code"
-      
+
       -- | Parse the character in an escape code and return its full
       -- representation.
       parseEsc :: (Char, CharPos) -> CharPosParser CharPos
       parseEsc (c,code) = char c >> return code
-      
+
       -- | A map from escape characters to full escape codes.
       escMap :: SourcePos -> [(Char, CharPos)]
       escMap pos = zip "abfnrtv\\\"\'"
