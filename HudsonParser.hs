@@ -6,13 +6,12 @@ import HudsonScanner
 
 import Control.Monad
 import Control.Monad.Identity (Identity)
-import Control.Applicative ((<*))
+import Control.Applicative ((<*), (<$>), liftA)
 
 import Text.Parsec ((<?>), (<|>))
 import Text.Parsec.Combinator
 import Text.Parsec.Prim
 import Text.Parsec.Pos
-import Text.Parsec.String
 import Text.Printf
 
 data Block = BlockStmt Stmt
@@ -31,17 +30,32 @@ data Stmt = Assignment VarID Expr
           | Null
             deriving (Eq, Show)
 
-data Decl = VarDecl {varName :: VarID, varType :: (Maybe ClassID), varExpr :: Expr}
-          | ConstDecl {constName :: VarID, constType :: (Maybe ClassID), constExpr :: Expr}
-          | FuncDecl {funcName :: VarID, funcParams :: [Param], funcCode :: [Block]}
-          | ProcDecl {procName :: VarID, procParams :: [Param], procCode :: [Block]}
-          | ClassDecl {className :: ClassID,
-                       inherit :: Maybe ClassID,
-                       subtypes :: [ClassID],
-                       classCode :: [Block]}
+data Decl = VarDecl { varName :: VarID
+                    , varType :: (Maybe ClassID)
+                    , varExpr :: Expr
+                    }
+          | ConstDecl { constName :: VarID
+                      , constType :: (Maybe ClassID)
+                      , constExpr :: Expr
+                      }
+          | FuncDecl { funcName :: VarID
+                     , funcParams :: [Param]
+                     , funcCode :: [Block]
+                     }
+          | ProcDecl { procName :: VarID, procParams :: [Param]
+                     , procCode :: [Block]
+                     }
+          | ClassDecl { className :: ClassID
+                      , inherit :: Maybe ClassID
+                      , subtypes :: [ClassID]
+                      , classCode :: [Block]
+                      }
             deriving (Eq, Show)
 
-data Param = Param {ref :: Bool, paramName :: VarID, paramType :: (Maybe ClassID)}
+data Param = Param { ref :: Bool
+                   , paramName :: VarID
+                   , paramType :: (Maybe ClassID)
+                   }
              deriving (Eq, Show)
 
 data Expr = LiteralInt Integer
@@ -76,9 +90,6 @@ type Parser = Parsec [Token] ()
 
 -- TODO
 --
--- Have a separate scanner to resolve continuation comments and
--- indentation.
---
 -- Allow single line function and procedure declarations.
 --
 -- Add more error messages.
@@ -91,21 +102,18 @@ parseFile fname = do
     Right xs -> print (removeJunk xs)
 
 
-tokenP :: (Stream [Token] Identity Token) => Token -> Parsec [Token] () Token
+tokenP :: (Stream [Token] Identity Token) => Token -> Parser Token
 tokenP x = token showTok posFromTok testTok
     where
-      showTok :: Token -> String
       showTok (t , pos) = show t
-      posFromTok :: Token -> SourcePos
       posFromTok (t, pos)  = pos
-      testTok :: Token -> Maybe Token
       testTok tok = if equal x tok then Just tok else Nothing
 
-
+-- TODO: This is ugly
 equal (NumberTok _, _)       (NumberTok _, _)      = True
-equal (ReservedTok s, _)     (ReservedTok s', _)    = s == s'
-equal (OperatorTok o, _)     (OperatorTok o', _)    = o == o'
-equal (SeparatorTok s, _)    (SeparatorTok s', _)   = s == s'
+equal (ReservedTok s, _)     (ReservedTok s', _)   = s == s'
+equal (OperatorTok o, _)     (OperatorTok o', _)   = o == o'
+equal (SeparatorTok s, _)    (SeparatorTok s', _)  = s == s'
 equal (StringTok _, _)       (StringTok _, _)      = True
 equal (UpperIDTok _, _)      (UpperIDTok _, _)     = True
 equal (LowerIDTok _, _)      (LowerIDTok _, _)     = True
@@ -119,31 +127,33 @@ equal (JunkTok, _)           (JunkTok, _)          = True
 equal _ _                                          = False
 
 emptyPos = newPos "" 0 0
-withEmpty = flip (,) emptyPos
-numberTag = tokenP . withEmpty $ NumberTok 0
-reserved s = tokenP . withEmpty $ ReservedTok s
-operator o = tokenP . withEmpty $ OperatorTok o
-string = tokenP . withEmpty $ StringTok "" 
-upperID = tokenP . withEmpty $ UpperIDTok "" 
-lowerID = tokenP . withEmpty $ LowerIDTok "" 
+
+withEmpty   = flip (,) emptyPos
+numberTag   = tokenP . withEmpty $ NumberTok 0
+reserved s  = tokenP . withEmpty $ ReservedTok s
+operator o  = tokenP . withEmpty $ OperatorTok o
+separator s = tokenP . withEmpty $ SeparatorTok s
+string      = tokenP . withEmpty $ StringTok "" 
+upperID     = tokenP . withEmpty $ UpperIDTok "" 
+lowerID     = tokenP . withEmpty $ LowerIDTok "" 
 objMemberID = tokenP . withEmpty $ ObjMemberIDTok "" 
 contComment = tokenP . withEmpty $ ContCommentTok "" 
-comment = tokenP . withEmpty $ CommentTok "" 
-indent = tokenP . withEmpty $ IndentTok
-outdent = tokenP . withEmpty $ OutdentTok
-newline = tokenP . withEmpty $ NewlineTok
-junk = tokenP . withEmpty $ JunkTok
+comment     = tokenP . withEmpty $ CommentTok "" 
+indent      = tokenP . withEmpty $ IndentTok
+outdent     = tokenP . withEmpty $ OutdentTok
+newline     = tokenP . withEmpty $ NewlineTok
+junk        = tokenP . withEmpty $ JunkTok
 
--- parseBlocks :: [Token] -> Parser [Block]
--- parseBlocks = manyTill parseBlock eof
+parseBlocks :: Parser [Block]
+parseBlocks = manyTill parseBlock eof
 
--- parseBlock :: Parser Block
--- parseBlock = liftM BlockStmt parseStmt
+parseBlock :: Parser Block
+parseBlock = liftM BlockStmt parseStmt
          -- <|> liftM BlockDecl parseDecl
-         -- <?> "declaration or statemnt"
+         <?> "declaration or statemnt"
 
--- parseStmt :: Parser Stmt
--- parseStmt = parseAssign
+parseStmt :: Parser Stmt
+parseStmt = parseAssign
 --         <|> parseProcCall
 --         <|> parseIf
         -- <|> parseWhile
@@ -160,12 +170,22 @@ junk = tokenP . withEmpty $ JunkTok
 --         <|> parseClassDecl
 --         <?> "declaration"
 
--- parseAssign = try $ do
---   v <- varIdentifier
---   reservedOp ":="
---   e <- parseExpr
---   newline
---   return $ Assignment v e
+-- TODO: Ugly and not typesafe
+tokenString :: Token -> String
+tokenString (StringTok s, _) = s
+tokenString (UpperIDTok s, _) = s
+tokenString (LowerIDTok s, _) = s
+tokenString (ObjMemberIDTok s, _) = s
+tokenString (ContCommentTok s, _) = s
+tokenString (CommentTok s, _) = s
+tokenString _ = error "Can't make a string from a non-string token."
+
+parseAssign = try $ do
+  v <- lowerID
+  separator AssignSep
+  e <- parseExpr
+  newline
+  return $ Assignment (tokenString v) LiteralNull
 
 -- spaces :: (Stream s m CharPos) => ParsecT s u m [CharPos]
 
@@ -308,7 +328,7 @@ junk = tokenP . withEmpty $ JunkTok
 --   return Param {ref = r, paramName = v, paramType = t}
 
 -- -- Expressions
--- parseExpr = liftM LiteralInt integer
+parseExpr = liftM LiteralInt integer
 
 -- parseOptionalType :: Parser (Maybe ClassID)
 -- parseOptionalType = try (liftM Just (colon >> classIdentifier))
@@ -324,3 +344,5 @@ junk = tokenP . withEmpty $ JunkTok
 -- pt a b = parse a "h" b
 
 -- getIndent = liftM sourceColumn getPosition
+
+pt p s = parse p "" <$> tokenizeString s
