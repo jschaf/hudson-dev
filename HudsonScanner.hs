@@ -2,19 +2,20 @@
 
 module HudsonScanner
     (removeJunk,
-     removeUnnecessary
+     removeUnnecessary,
      tokenize,
      Token,
      tokenizeHudsonFile,
      Tok(..),
     ) where
 
-import Control.Applicative (Applicative, liftA, liftA2)
-import Control.Monad.Identity
+import Control.Monad (msum, liftM)
+import Control.Applicative (Applicative, liftA, liftA2, (<$>))
+import Control.Monad.Identity (Identity)
 
 import Data.Char
 import Data.Function (on)
-import Data.List (mapAccumL, foldl')
+import Data.List (mapAccumR, mapAccumL, foldl')
 
 import qualified Data.Map as Map
 
@@ -23,10 +24,11 @@ import Text.Parsec.Combinator
 import Text.Parsec.Prim
 import Text.Parsec.Pos
 
+import Text.Printf
+
 -- TODO:
 --
--- Try to not rewrite all the Parsec Char parsers
---
+-- Try to not rewrite all the Parsec Char parsers.
 
 data CharPos = CharPos {cpChar :: Char, cpPos :: SourcePos}
              deriving (Show)
@@ -39,18 +41,20 @@ instance Ord CharPos where
 
 type Token  = (Tok, SourcePos)
 
-data Tok = NumberTok       Integer
-         | ReservedTok     Keyword
-         | OperatorTok     Operator
-         | SeparatorTok    Separator
-         | StringTok       String
-         | UpperIDTok      String
-         | LowerIDTok      String
-         | ObjMemberIDTok  String 
-         | ContCommentTok  String
-         | CommentTok      String
-         | NewlineTok
-         | JunkTok
+data Tok = NumberTok       Integer   -- ^ a literal integer
+         | ReservedTok     Keyword   -- ^ a reserved keyword
+         | OperatorTok     Operator  -- ^ a Hudson operator (i.e. > or +)
+         | SeparatorTok    Separator -- ^ a Hudson separator (i.e. :=)
+         | StringTok       String    -- ^ a literal string
+         | UpperIDTok      String    -- ^ an uppercased ID
+         | LowerIDTok      String    -- ^ a lowercased ID
+         | ObjMemberIDTok  String    -- ^ an object member 
+         | ContCommentTok  String    -- ^ a continuation comment
+         | CommentTok      String    -- ^ a comment
+         | IndentTok                 -- ^ an indent token
+         | OutdentTok                -- ^ an outdent token
+         | NewlineTok                -- ^ a newline
+         | JunkTok                   -- ^ junk (i.e. whitespace)
            deriving (Show)
 
 data Keyword = AndKW       | AssertKW   | ClassKW  | ConstantKW | DoKW
@@ -72,20 +76,57 @@ tokenizeHudsonFile :: String -> IO (Either ParseError [Token])
 tokenizeHudsonFile fname = do
   input <- readFile fname
   let lexed = prelex input fname
-  return $ parse tokenize fname lexed
+  return $ removeUnnecessary <$> parse tokenize fname lexed
 
+-- | Remove junk tokens
 removeJunk :: [Token] -> [Token]
 removeJunk = filter f
     where f (JunkTok, _) = False
           f _ = True
 
+-- | Remove Junk, newline and comment tokens.
 removeUnnecessary = filter f
     where f (JunkTok, _) = False
-          f (NewlineTok, _) = False
           f (CommentTok _, _) = False
           f _ = True
 
+debugView :: [Token] -> [String]
+debugView = map display
+    where display (t, s) = printf "(%s, (%d,%d))" (show t) (sourceLine s) (sourceColumn s)
 
+-- | Insert Indent and Outdent tokens into the list.  Like foldr, but
+-- tracks the last indented node that wasn't a newline or continuation
+-- comment.  
+offside :: [Token] -> [Token]
+offside [] = []
+offside ts = off (head ts) [] ts
+    where
+      -- TODO: remove acc because the same information is in stk
+
+      -- | Traverse the tokens and insert indent and outdent tokens.
+      -- Keep a stack of column positions so we can properly outdent
+      -- multiple levels.
+      off :: Token -> [Int] -> [Token] -> [Token]
+      off acc stk [] = replicate (length stk) (OutdentTok, pos . last $ ts)
+      off acc stk (x@(NewlineTok, _):xs)       = x:(off acc stk xs)
+      off acc stk (x@(JunkTok, _):xs)          = x:(off acc stk xs)
+      off acc stk (x@(ContCommentTok _, _):xs) = x:(off acc stk xs)
+      off acc stk (x@(CommentTok _, _):xs)     = x:(off acc stk xs)
+
+      off acc stk (x:xs)
+          | line x == line acc = x:(off acc stk xs)
+          | col x < col acc    = outdents x stk ++
+                                 x : (off x (dropWhile (>col x) stk) xs)
+          | col x > col acc    = (IndentTok, pos x) : x : (off x (col x : stk) xs)
+          | otherwise          = x:(off acc stk xs)
+                                 
+      outdents :: Token -> [Int] -> [Token]
+      outdents tok stk = replicate (length $ takeWhile (> col tok) stk) (OutdentTok, pos tok)
+      col = sourceColumn . pos
+      line = sourceLine . pos
+      pos = snd
+
+-- | Return the string representation of a list of CharPos.
 toString :: [CharPos] -> String
 toString = map cpChar
 
@@ -125,7 +166,7 @@ string s = do
   tokens (map cpChar) (foldl' updatePos) (prelex' pos s)
 
 tokenize = manyTill p eof
-    where p = choice [spaceJunk, newlinetok, identifier, operator, separator,
+    where p = choice [newlinetok, spaceJunk, identifier, operator, separator,
                       integer, stringLiteral, contComment, comment]
 
 spaceJunk = spaces >>= (\(x:xs) -> return (JunkTok, cpPos x))
@@ -174,6 +215,8 @@ ident = alpha <:> many idChar
 
 idChar = alphaNum <|> char '_' <|> char '.'
 
+-- | Parse an identifier and classify it as reserved word, lowercase
+-- identifier or uppercase identifier.
 identifier = mkToken (objMember <|> ident) toTok
     where 
       toTok xs = maybe (toID xs) ReservedTok (Map.lookup (toString xs) keywordMap)
@@ -183,7 +226,8 @@ identifier = mkToken (objMember <|> ident) toTok
                     | cpChar t == '.'    = ObjMemberIDTok $ toString ts
                     | otherwise          = error "Need upper or lowercase"
 
-
+-- | Association list of hudson operators with an abstract
+-- representation.
 hudsonOperators = [("+", PlusOp),     ("-",  MinusOp),
                    ("*", MultiplyOp), ("/",  DivideOp),
                    ("%", ModulusOp),  ("=",  EqualityOp),
@@ -206,10 +250,12 @@ trySeparator (s, o) = do (x:_) <- try (string s)
 
 separator = msum $ map trySeparator hudsonSeparators
 
+-- | Tokenize a continuation comment.
 contComment = mkToken' (try (string "##") >> manyTill anyChar newline)
                        (ContCommentTok . toString)
                        (ContCommentTok "")
 
+-- | Tokenize a regular comment.
 comment = mkToken' (char '#' >> manyTill anyChar newline)
                    (CommentTok . toString)
                    (CommentTok "")
@@ -257,3 +303,6 @@ stringLiteral = do pos <- getPosition
 type CharPosParser t = Parsec [CharPos] () t
 
 test p s = parseTest p (prelex s "")
+
+example = liftM fromRight $ tokenizeHudsonFile "test1.hud"
+    where fromRight (Right a)  = a
