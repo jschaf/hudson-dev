@@ -129,20 +129,23 @@ equal _ _                                          = False
 emptyPos = newPos "" 0 0
 
 withEmpty   = flip (,) emptyPos
-numberTag   = tokenP . withEmpty $ NumberTok 0
-reserved s  = tokenP . withEmpty $ ReservedTok s
-operator o  = tokenP . withEmpty $ OperatorTok o
-separator s = tokenP . withEmpty $ SeparatorTok s
-string      = tokenP . withEmpty $ StringTok "" 
-upperID     = tokenP . withEmpty $ UpperIDTok "" 
-lowerID     = tokenP . withEmpty $ LowerIDTok "" 
-objMemberID = tokenP . withEmpty $ ObjMemberIDTok "" 
-contComment = tokenP . withEmpty $ ContCommentTok "" 
-comment     = tokenP . withEmpty $ CommentTok "" 
-indent      = tokenP . withEmpty $ IndentTok
-outdent     = tokenP . withEmpty $ OutdentTok
-newline     = tokenP . withEmpty $ NewlineTok
-junk        = tokenP . withEmpty $ JunkTok
+numberTag   = tokenP (withEmpty $ NumberTok 0) <?> "integer"
+reserved s  = tokenP (withEmpty $ ReservedTok s) <?> "keyword " ++ keywordString s
+operator o  = tokenP (withEmpty $ OperatorTok o) <?> "operator"
+separator s = tokenP (withEmpty $ SeparatorTok s) <?> "separator"
+string      = tokenP (withEmpty $ StringTok "" ) <?> "string"
+upperID     = tokenP (withEmpty $ UpperIDTok "" ) <?> "upperID"
+lowerID     = tokenP (withEmpty $ LowerIDTok "" ) <?> "lowerID"
+objMemberID = tokenP (withEmpty $ ObjMemberIDTok "" ) <?> "objMemberID"
+contComment = tokenP (withEmpty $ ContCommentTok "" ) <?> "contComment"
+comment     = tokenP (withEmpty $ CommentTok "" ) <?> "comment"
+indent      = tokenP (withEmpty $ IndentTok) <?> "indent"
+outdent     = tokenP (withEmpty $ OutdentTok) <?> "outdent"
+newline     = tokenP (withEmpty $ NewlineTok) <?> "newline"
+junk        = tokenP (withEmpty $ JunkTok) <?> "junk"
+
+parens = between (separator LParenSep) (separator RParenSep)
+commaSep = flip sepBy (separator CommaSep)
 
 parseBlocks :: Parser [Block]
 parseBlocks = manyTill parseBlock eof
@@ -184,28 +187,16 @@ parseAssign = try $ do
   v <- lowerID
   separator AssignSep
   e <- parseExpr
-  newline
-  return $ Assignment (tokenString v) LiteralNull
+  newl2
+  return $ Assignment (tokenString v) e
 
--- spaces :: (Stream s m CharPos) => ParsecT s u m [CharPos]
+newl2 = return LiteralNull
 
--- upperID :: (Stream s m Token) => ParsecT s u m String
--- upperID = myToken UpperID
-
-
--- token' x = token showTok posFromTok testTok
---     where
---       showTok (pos,t)     = show t
---       posFromTok (pos,t)  = pos
---       testTok (pos,t)     = if x == t then Just t else Nothing
-
--- blah = token' "a"
-
--- parseProcCall = try $ do
---   p <- varIdentifier
---   ps <- parens (commaSep parseExpr)
---   newline
---   return $ ProcCall p ps
+parseProcCall = try $ do
+  p <- lowerID
+  ps <- parens (commaSep parseExpr) <?> "expression"
+  newl2
+  return $ ProcCall (tokenString p) ps
 
 -- parseIf = do
 --   indent <- getIndent
@@ -248,13 +239,17 @@ parseAssign = try $ do
 --                            then parseBlock
 --                            else pzero
 
--- parseWhile = do
---   indent <- getIndent
---   reserved "while"
---   cond <- parseExpr
---   reserved "do"
---   code <- parseCode indent
---   return $ While cond code
+-- TODO: sep by newlines
+parseCode = between indent outdent ( parseBlocks)
+
+parseWhile = do
+  reserved WhileKW
+  cond <- parseExpr
+  reserved DoKW
+  newline
+  code <- parseCode <?> "code block"
+  newl2
+  return $ While cond code
           
 -- parseReturn = do
 --   reserved "return"
@@ -328,7 +323,11 @@ parseAssign = try $ do
 --   return Param {ref = r, paramName = v, paramType = t}
 
 -- -- Expressions
-parseExpr = liftM LiteralInt integer
+parseExpr = liftM LiteralInt pInteger
+
+pInteger = do
+  (NumberTok n, _) <- numberTag
+  return n
 
 -- parseOptionalType :: Parser (Maybe ClassID)
 -- parseOptionalType = try (liftM Just (colon >> classIdentifier))
