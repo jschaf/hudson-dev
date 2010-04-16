@@ -3,6 +3,7 @@
 module HudsonScanner
     ( removeJunk
     , removeUnnecessary
+    , keywordString
     , tokenize
     , Token
     , tokenizeHudsonFile
@@ -76,11 +77,14 @@ data Operator = PlusOp    | MinusOp    | MultiplyOp | DivideOp
 data Separator = AssignSep | ColonSep | CommaSep | LParenSep | RParenSep
                  deriving (Eq, Show)
 
+keywordString :: Keyword -> String
+keywordString = map toLower . init . init . show
+
 tokenizeHudsonFile :: String -> IO (Either ParseError [Token])
 tokenizeHudsonFile fname = do
   input <- readFile fname
   let lexed = prelex input fname
-  return $ removeUnnecessary <$> parse tokenize fname lexed
+  return $ removeUnnecessary <$> offside <$> parse tokenize fname lexed
 
 -- | Remove junk tokens
 removeJunk :: [Token] -> [Token]
@@ -312,4 +316,4 @@ test p s = parseTest p (prelex s "")
 example = liftM fromRight $ tokenizeHudsonFile "test1.hud"
     where fromRight (Right a)  = a
 
-tokenizeString s = removeUnnecessary <$> parse tokenize "" (prelex s "")
+tokenizeString s = removeUnnecessary <$> offside <$> parse tokenize "" (prelex s "")
