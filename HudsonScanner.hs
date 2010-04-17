@@ -12,6 +12,7 @@ module HudsonScanner
     , Separator(..)
     , Operator(..)
     , Keyword(..)
+    , (<:>)
     ) where
 
 import Control.Monad (msum, liftM)
