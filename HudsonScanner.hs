@@ -67,7 +67,7 @@ data Keyword = AndKW       | AssertKW   | ClassKW  | ConstantKW | DoKW
              | InheritKW   | IsKW       | NotKW    | NullKW     | OrKW
              | ProcedureKW | RefKW      | ReturnKW | ThenKW     | ThisKW
              | TrueKW      | VariableKW | WhileKW
-               deriving (Eq, Show)
+               deriving (Enum, Eq, Show)
 
 data Operator = PlusOp    | MinusOp    | MultiplyOp | DivideOp
               | ModulusOp | EqualityOp | TypeTestOp | GreaterEqOp
@@ -98,39 +98,55 @@ removeUnnecessary = filter f
           f (CommentTok _, _) = False
           f _ = True
 
-debugView :: [Token] -> [String]
-debugView = map display
-    where display (t, s) = printf "(%s, (%d,%d))" (show t) (sourceLine s) (sourceColumn s)
-
 -- | Insert Indent and Outdent tokens into the list.  Like foldr, but
 -- tracks the last indented node that wasn't a newline or continuation
 -- comment.
 offside :: [Token] -> [Token]
 offside [] = []
-offside ts = off (head ts) [] ts
+offside ts = off [head ts] ts
     where
-      -- TODO: remove acc because the same information is in stk
 
       -- | Traverse the tokens and insert indent and outdent tokens.
       -- Keep a stack of column positions so we can properly outdent
       -- multiple levels.
-      off :: Token -> [Int] -> [Token] -> [Token]
-      off acc stk [] = replicate (length stk) (OutdentTok, pos . last $ ts)
-      off acc stk (x@(NewlineTok, _):xs)       = x:(off acc stk xs)
-      off acc stk (x@(JunkTok, _):xs)          = x:(off acc stk xs)
-      off acc stk (x@(ContCommentTok _, _):xs) = x:(off acc stk xs)
-      off acc stk (x@(CommentTok _, _):xs)     = x:(off acc stk xs)
 
-      off acc stk (x:xs)
-          | line x == line acc = x:(off acc stk xs)
-          | col x < col acc    = outdents x stk ++
-                                 x : (off x (dropWhile (>col x) stk) xs)
-          | col x > col acc    = (IndentTok, pos x) : x : (off x (col x : stk) xs)
-          | otherwise          = x:(off acc stk xs)
+      off :: [Token]            -- ^ the stack of indents
+          -> [Token]            -- ^ the list of tokens
+          -> [Token]
 
-      outdents :: Token -> [Int] -> [Token]
-      outdents tok stk = replicate (length $ takeWhile (> col tok) stk)
-                                   (OutdentTok, pos tok)
+      -- Subtract one because we use the first token to initialize the
+      -- stack, but it doesn't change indentation.
+      off stk [] = replicate (length stk - 1) (OutdentTok, pos . last $ ts)
+
+      -- Tokens that don't affect indentation
+      off stk (x@(NewlineTok, _):xs)       = x:(off stk xs)
+      off stk (x@(JunkTok, _):xs)          = x:(off stk xs)
+      off stk (x@(ContCommentTok _, _):xs) = x:(off stk xs)
+      off stk (x@(CommentTok _, _):xs)     = x:(off stk xs)
+
+      -- Compare the relative indentation of the current token @t@ to
+      -- the top of the indentation stack @s@.  When less, insert the
+      -- proper number of outdents, the rest of the line and then
+      -- continue.  When greater, insert one indent token, the rest of
+      -- the line and then continue after pushing the current token on
+      -- the indentation stack.  When equal, insert the current line
+      -- and then continue.
+      off stk@(s:ss) tss@(t:ts)
+          | t `dedents` s = outdents ++ lineCode ++ off remaining restCode
+          | t `indents` s = (IndentTok, pos t) : lineCode ++ off (t:stk) restCode
+          | otherwise     = lineCode ++ off stk restCode
+          where
+            (closed, remaining) = span (dedents t) stk
+            -- | A list with an outdent for each level of indentation
+            -- closed.
+            outdents = replicate (length closed) (OutdentTok, pos t)
+            
+            spanToNewline = span f tss
+                where f (NewlineTok, _) = False
+                      f _               = True
+            (lineCode, restCode) = spanToNewline
+      x `dedents` s = col x < col s
+      x `indents` s = col x > col s
       col = sourceColumn . pos
       line = sourceLine . pos
       pos = snd
@@ -194,38 +210,35 @@ toNum digits = foldl' convert 0 digits
 (<:>) = liftA2 (:)
 infixr 5 <:>
 
+-- | Return a token with the results of parser @p@ wrapped in @f@,
+-- with the source position set to the first character parsed.
 mkToken p f = do xss@(x:xs) <- p
                  return (f xss, cpPos x)
 
+-- | Same as @mkToken@, but use @d@ as a default value if not input is
+-- consumed (e.g. an empty comment).
 mkToken' p f d = do pos <- getPosition
                     xs <- p
                     if null xs
                       then return (d, pos)
                       else return (f xs, cpPos $ head xs)
 
-hudsonKeywords = [("and", AndKW),           ("assert", AssertKW),
-                  ("class", ClassKW),       ("constant", ConstantKW),
-                  ("do", DoKW),             ("else", ElseKW),
-                  ("false", FalseKW),       ("fun", FunKW),
-                  ("function", FunctionKW), ("if", IfKW),
-                  ("inherit", InheritKW),   ("is", IsKW),
-                  ("not", NotKW),           ("null", NullKW),
-                  ("or", OrKW),             ("procedure", ProcedureKW),
-                  ("ref", RefKW),           ("return", ReturnKW),
-                  ("then", ThenKW),         ("this", ThisKW),
-                  ("true", TrueKW),         ("variable", VariableKW),
-                  ("while", WhileKW)]
+-- | Association list of hudson keywords strings with the associated
+-- constructor.
+hudsonKeywords = [(keywordString k, k) | k <- [AndKW .. WhileKW]]
 
 keywordMap = Map.fromList hudsonKeywords
 
+-- | Match an object method.
 objMember = char '.' <:> lower <:> many idChar <?> "class method or variable name"
 
+-- | Match any identifier. 
 ident = alpha <:> many idChar
 
 idChar = alphaNum <|> char '_' <|> char '.'
 
 -- | Parse an identifier and classify it as reserved word, lowercase
--- identifier or uppercase identifier.
+-- identifier, uppercase identifier or object method name.
 identifier = mkToken (objMember <|> ident) toTok
     where
       toTok xs = maybe (toID xs) ReservedTok (Map.lookup (toString xs) keywordMap)
