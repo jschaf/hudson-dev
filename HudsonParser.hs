@@ -86,20 +86,18 @@ data BinaryOp = Add
               | Concat
                 deriving (Eq, Show)
 
-type Parser = Parsec [Token] ()
+type Parser t = Parsec [Token] () t
 
 -- TODO
 --
--- Allow single line function and procedure declarations.
---
--- Add more error messages.
---
 -- Create expression parser.
+
 parseFile fname = do
   ts <- tokenizeHudsonFile fname
-  case ts of
-    Left err -> print err
-    Right xs -> print (removeJunk xs)
+  return $ parse parseBlocks fname <$> ts
+  -- case ts of
+  --   Left err -> print err
+  --   Right xs -> print (removeJunk xs)
 
 
 tokenP :: (Stream [Token] Identity Token) => Token -> Parser Token
@@ -127,51 +125,44 @@ equal (JunkTok, _)           (JunkTok, _)          = True
 equal _ _                                          = False
 
 emptyPos = newPos "" 0 0
-
 withEmpty   = flip (,) emptyPos
+
 numberTag   = tokenP (withEmpty $ NumberTok 0) <?> "integer"
 reserved s  = tokenP (withEmpty $ ReservedTok s) <?> "keyword " ++ keywordString s
 operator o  = tokenP (withEmpty $ OperatorTok o) <?> "operator"
 separator s = tokenP (withEmpty $ SeparatorTok s) <?> "separator"
 string      = tokenP (withEmpty $ StringTok "" ) <?> "string"
-upperID     = tokenP (withEmpty $ UpperIDTok "" ) <?> "upperID"
-lowerID     = tokenP (withEmpty $ LowerIDTok "" ) <?> "lowerID"
-objMemberID = tokenP (withEmpty $ ObjMemberIDTok "" ) <?> "objMemberID"
+upperID     = tokenString <$> tokenP (withEmpty $ UpperIDTok "" ) <?> "upperID"
+lowerID     = tokenString <$> tokenP (withEmpty $ LowerIDTok "" ) <?> "lowerID"
+objMemberID = tokenString <$> tokenP (withEmpty $ ObjMemberIDTok "" ) <?> "objMemberID"
 contComment = tokenP (withEmpty $ ContCommentTok "" ) <?> "contComment"
 comment     = tokenP (withEmpty $ CommentTok "" ) <?> "comment"
-indent      = tokenP (withEmpty $ IndentTok) <?> "indent"
-outdent     = tokenP (withEmpty $ OutdentTok) <?> "outdent"
-newline     = tokenP (withEmpty $ NewlineTok) <?> "newline"
-junk        = tokenP (withEmpty $ JunkTok) <?> "junk"
+indent      = tokenP (withEmpty IndentTok) <?> "indent"
+outdent     = tokenP (withEmpty OutdentTok) <?> "outdent"
+newline     = tokenP (withEmpty NewlineTok) <?> "newline"
+junk        = tokenP (withEmpty JunkTok) <?> "junk"
 
 parens = between (separator LParenSep) (separator RParenSep)
 commaSep = flip sepBy (separator CommaSep)
+commaSep1 = flip sepBy1 (separator CommaSep)
 
 parseBlocks :: Parser [Block]
-parseBlocks = manyTill parseBlock eof
+parseBlocks = (many newline >> sepEndBy1 parseBlock (many newline)) <?> "general error"
 
 parseBlock :: Parser Block
 parseBlock = liftM BlockStmt parseStmt
-         -- <|> liftM BlockDecl parseDecl
+         <|> liftM BlockDecl parseDecl
          <?> "declaration or statemnt"
 
 parseStmt :: Parser Stmt
-parseStmt = parseAssign
---         <|> parseProcCall
---         <|> parseIf
-        -- <|> parseWhile
-        -- <|> parseReturn
-        -- <|> parseAssert
-        -- <|> parseNull
-        -- <?> "statement"
+parseStmt = choice [parseAssign, parseProcCall, parseIf, parseWhile,
+                    parseReturn, parseAssert, parseNull]
+        <?> "statement"
 
--- parseDecl :: Parser Decl
--- parseDecl = parseVarDecl
---         <|> parseConstDecl
---         <|> parseFuncDecl
---         <|> parseProcDecl
---         <|> parseClassDecl
---         <?> "declaration"
+parseDecl :: Parser Decl
+parseDecl = choice [parseVarDecl, parseConstDecl, parseFuncDecl, parseProcDecl,
+                    parseClassDecl]
+        <?> "declaration"
 
 -- TODO: Ugly and not typesafe
 tokenString :: Token -> String
@@ -187,140 +178,97 @@ parseAssign = try $ do
   v <- lowerID
   separator AssignSep
   e <- parseExpr
-  newl2
-  return $ Assignment (tokenString v) e
-
-newl2 = return LiteralNull
+  return $ Assignment v e
 
 parseProcCall = try $ do
   p <- lowerID
   ps <- parens (commaSep parseExpr) <?> "expression"
-  newl2
-  return $ ProcCall (tokenString p) ps
+  return $ ProcCall p ps
 
--- parseIf = do
---   indent <- getIndent
---   parseIf' indent
-           
--- parseIf' n = do
---   reserved "if"
---   cond <- parseExpr
---   reserved "then"
---   ifCode <- parseCode n
---   elseCode <- parseElse n <|> return []
---   return $ If cond ifCode elseCode
+parseIf = do
+  reserved IfKW
+  cond <- parseExpr
+  reserved ThenKW
+  ifCode <- parseCode
+  elseCode <- (reserved ElseKW >> parseCode) <|> return [] <?> "else block"
+  return $ If cond ifCode elseCode
 
--- parseElse indent = do
---   reserved "else"
---   -- Special case the if statement because the indentation should match
---   -- that of the enclosing else block, not the new if statment.
---   enclosedIf <|> parseCode indent
---       where enclosedIf = liftM ((:[]) . BlockStmt) (parseIf' indent)
-
-
--- -- | Parse indented code block of a method or class.  Parses all code
--- -- indented greater than n spaces.
--- parseCode :: Int -> Parser [Block]
--- parseCode n = multipleStmts <|> singleStmt
---     where
---       singleStmt = liftM (:[]) parseBlock
---       multipleStmts = newline >> parseMultStmts n
-
--- parseMultStmts n = do
---   whiteSpace
---   indent <- getIndent
---   if indent <= n
---      then fail "need indented declaration"
---      else many1 (parseCode' indent) <?> "indented declaration"
---     where
---       parseCode' m = do whiteSpace
---                         indent <- getIndent
---                         if indent >= m
---                            then parseBlock
---                            else pzero
-
--- TODO: sep by newlines
-parseCode = between indent outdent ( parseBlocks)
+parseCode = (newline >> between indent outdent parseBlocks)
+        <|> (parseBlock <:> return [])
+        <?> "indented code block or single statement"
 
 parseWhile = do
   reserved WhileKW
   cond <- parseExpr
   reserved DoKW
-  newline
-  code <- parseCode <?> "code block"
-  newl2
+  code <- parseCode
   return $ While cond code
-          
--- parseReturn = do
---   reserved "return"
---   e <- option Nothing $ try (liftM Just parseExpr)
---   newline
---   return $ Return e
 
--- parseAssert = do
---   reserved "assert"
---   e <- parseExpr
---   newline
---   return $ Assert e
+parseReturn = do
+  reserved ReturnKW
+  e <- option Nothing $ try (liftM Just parseExpr)
+  return $ Return e
 
--- parseNull = reserved "null" >> newline >> return Null
+parseAssert = do
+  reserved AssertKW
+  e <- parseExpr
+  return $ Assert e
 
--- -- Declarations
+parseNull = reserved NullKW >> return Null
 
--- parseVarDecl = do
---   reserved "variable"
---   n <- varIdentifier
---   optType <- parseOptionalType
---   reservedOp ":="
---   e <- parseExpr
---   newline
---   return VarDecl {varName = n, varType = optType, varExpr = e}
+-- Declarations
 
--- parseConstDecl = do
---   reserved "constant"
---   n <- varIdentifier
---   optType <- parseOptionalType
---   reservedOp ":="
---   e <- parseExpr
---   newline
---   return ConstDecl {constName = n, constType = optType, constExpr = e}
+parseVarDecl = do
+  reserved VariableKW
+  n <- lowerID
+  optType <- parseOptionalType
+  separator AssignSep
+  e <- parseExpr
+  return VarDecl {varName = n, varType = optType, varExpr = e}
 
--- parseFuncDecl = do
---   indent <- getIndent
---   reserved "function"
---   n <- varIdentifier
---   ps <- parseParams
---   reserved "is"
---   c <- parseCode indent
---   return FuncDecl {funcName = n, funcParams = ps, funcCode = c}
+parseConstDecl = do
+  reserved ConstantKW
+  n <- lowerID
+  optType <- parseOptionalType
+  separator AssignSep
+  e <- parseExpr
+  return ConstDecl {constName = n, constType = optType, constExpr = e}
 
--- parseProcDecl = do
---   indent <- getIndent
---   reserved "procedure"
---   n <- varIdentifier
---   ps <- parseParams
---   reserved "is"
---   c <- parseCode indent
---   return ProcDecl {procName = n, procParams = ps, procCode = c}
+parseFuncDecl = do
+  reserved FunctionKW
+  n <- lowerID
+  ps <- parseParams
+  reserved IsKW
+  c <- parseCode
+  return FuncDecl {funcName = n, funcParams = ps, funcCode = c}
 
--- parseClassDecl = do
---   indent <- getIndent
---   reserved "class"
---   n <- classIdentifier
---   i <- liftM Just (reserved "inherit" >> classIdentifier) <|> return Nothing
---   s <- (reservedOp "<" >> commaSep1 classIdentifier) <|> return []
---   reserved "is"
---   c <- parseCode indent
---   return ClassDecl {className = n, inherit = i, subtypes = s, classCode = c}
+parseProcDecl = do
+  reserved ProcedureKW
+  n <- lowerID
+  ps <- parseParams
+  reserved IsKW
+  c <- parseCode
+  return ProcDecl {procName = n, procParams = ps, procCode = c}
 
--- -- Params
--- parseParams = parens (commaSep parseParam)
+parseClassDecl = do
+  reserved ClassKW
+  n <- upperID
+  inherit <- liftM Just (reserved InheritKW >> upperID)
+          <|> return Nothing <?> "parent class"
+  subtypes <- (operator GreaterOp >> commaSep1 upperID)
+          <|> return [] <?> "subtypes"
+  reserved IsKW
+  c <- parseCode
+  return ClassDecl {className = n, inherit = inherit,
+                    subtypes = subtypes, classCode = c}
 
--- parseParam = do
---   r <- (reserved "ref" >> return True) <|> return False
---   v <- varIdentifier
---   t <- parseOptionalType
---   return Param {ref = r, paramName = v, paramType = t}
+parseParams = parens (commaSep parseParam)
+
+parseParam = do
+  r <- (reserved RefKW >> return True) <|> return False
+  v <- lowerID
+  t <- parseOptionalType
+  return Param {ref = r, paramName = v, paramType = t}
 
 -- -- Expressions
 parseExpr = liftM LiteralInt pInteger
@@ -329,19 +277,11 @@ pInteger = do
   (NumberTok n, _) <- numberTag
   return n
 
--- parseOptionalType :: Parser (Maybe ClassID)
--- parseOptionalType = try (liftM Just (colon >> classIdentifier))
---                 <|> return Nothing
-
--- hudFunc = "function blah(one, two) is\n  write(1)\n  function nest () is\n    write(2)\n"
---        ++ "function joe (three, four) is \n  write(3)\n"
---        ++ "write(4)"
-
--- pr = putStrLn hudFunc
--- t = parseFile "test1.hud"
-
--- pt a b = parse a "h" b
-
--- getIndent = liftM sourceColumn getPosition
+parseOptionalType = try (liftM Just (tokenString <$>
+                                     separator ColonSep >> upperID))
+                <|> return Nothing
 
 pt p s = parse p "" <$> tokenizeString s
+ts = tokenizeString
+
+
