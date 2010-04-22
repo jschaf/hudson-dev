@@ -32,12 +32,12 @@ data Stmt = Assignment VarID Expr
             deriving (Eq, Show)
 
 data Decl = VarDecl { varName :: VarID
-                    , varType :: (Maybe ClassID)
-                    , varExpr :: Expr
+                    , varType :: Maybe ClassID
+                    , varExpr :: Maybe Expr
                     }
           | ConstDecl { constName :: VarID
-                      , constType :: (Maybe ClassID)
-                      , constExpr :: Expr
+                      , constType :: Maybe ClassID
+                      , constExpr :: Maybe Expr
                       }
           | FuncDecl { funcName :: VarID
                      , funcParams :: [Param]
@@ -64,11 +64,13 @@ data Expr = LiteralInt Integer
           | LiteralStr String
           | LiteralBool Bool
           | LiteralNull
+          | ClassLookup ClassID
           | Negate Expr
           | Not Expr
           | Binary BinaryOp Expr Expr
           | VarLookup VarID
           | FuncCall VarID [Expr]
+          | ClassCall ClassID [Expr]
           | TypeTest Expr String
           | LambdaExpr { lambdaParams :: [Param]
                        , lambdaExpr :: Expr
@@ -194,15 +196,18 @@ parseProcCall = try (do p <- lowerOrObjID
                     )
                 <?> "procedure call"
 
+-- TODO: Layout for `else statement` not strictly enforced following a
+-- block `if statement`.
 parseIf = do reserved IfKW
              cond <- parseExpr
              reserved ThenKW
              ifCode <- parseCode
-             elseCode <- (reserved ElseKW >> parseCode) <|> return [] <?> "else block"
+             elseCode <- try (optional newline >> reserved ElseKW >> parseCode)
+                      <|> return [] <?> "else block"
              return $ If cond ifCode elseCode
           <?> "if statement"
 
-parseCode = (newline >> between indent outdent parseBlocks)
+parseCode = (many1 newline >> between indent outdent parseBlocks)
         <|> (parseBlock <:> return [])
         <?> "indented code block or single statement"
 
@@ -230,18 +235,20 @@ parseNull = reserved NullKW >> return Null <?> "null keyword"
 parseVarDecl = do reserved VariableKW
                   n <- lowerOrObjID
                   optType <- parseOptionalType
-                  separator AssignSep
-                  e <- parseExpr
+                  e <- parseOptionalExpr
                   return VarDecl {varName = n, varType = optType, varExpr = e}
                <?> "variable declaration"
 
 parseConstDecl = do reserved ConstantKW
                     n <- lowerOrObjID
                     optType <- parseOptionalType
-                    separator AssignSep
-                    e <- parseExpr
+                    e <- parseOptionalExpr
                     return ConstDecl {constName = n, constType = optType, constExpr = e}
                  <?> "constant declaration"
+
+parseOptionalExpr = liftM Just (separator AssignSep >> parseExpr)
+                <|> return Nothing
+                <?> "optional expression"
 
 parseFuncDecl = do reserved FunctionKW
                    n <- lowerOrObjID
@@ -263,7 +270,7 @@ parseClassDecl = do reserved ClassKW
                     n <- upperID
                     inherit <- liftM Just (reserved InheritKW >> upperID)
                             <|> return Nothing <?> "parent class"
-                    subtypes <- (operator GreaterOp >> commaSep1 upperID)
+                    subtypes <- (operator LessOp >> commaSep1 upperID)
                             <|> return [] <?> "subtypes"
                     reserved IsKW
                     c <- parseCode
@@ -288,16 +295,18 @@ parseOptionalType = try (liftM Just (tokenString <$>
 -- Expressions
 parseExpr = buildExpressionParser table term <?> "expression"
 
-term = choice [ parseLambdaExpr
-              , parseFuncCall
-              , parseTrue
-              , parseFalse
-              , parseExprNull
-              , parseVarLookup
-              , parseInteger
-              , parens parseExpr
-              ]
-            <?> "simple expresion"
+term = parseLambdaExpr
+   <|> parseFuncCall
+   <|> parseTrue
+   <|> parseFalse
+   <|> parseClassCall
+   <|> parseClassLookup
+   <|> parseExprNull
+   <|> parseVarLookup
+   <|> parseInteger
+   <|> parseString
+   <|> parens parseExpr
+   <?> "simple expresion"
 
 table   = [ -- TODO (. field acces, () func call, ? type test)
             [prefix MinusOp Negate, prefixKW NotKW Not]
@@ -313,6 +322,14 @@ table   = [ -- TODO (. field acces, () func call, ? type test)
           , [binaryKWLeft AndKW And]
           , [binaryKWLeft OrKW Or]
           ]
+
+parseClassLookup = try $ return ClassLookup <*> upperID
+
+parseClassCall = try (do c <- upperID
+                         ps <- parens (commaSep parseExpr)
+                         return $ ClassCall c ps
+                     )
+                 <?> "class call"
 
 binaryKW name fun assoc = Infix (do{ reserved name; return $ Binary fun }) assoc
 binaryKWLeft name fun = binaryKW name fun AssocLeft
@@ -336,11 +353,12 @@ parseFuncCall = try (do p <- lowerOrObjID
                     )
                 <?> "function call"
 
-parseVarLookup = return VarLookup <*> lowerOrObjID <?> "variable or constant lookup"
+parseVarLookup = (try $ return VarLookup <*> lowerOrObjID)
+             <?> "variable or constant lookup"
   
 parseInteger = do (NumberTok n, _) <- numberTag
                   return $ LiteralInt n
-               <?> "integer"
+              <?> "integer"
 
 parseString = do (StringTok s, _) <- string
                  return $ LiteralStr s
@@ -354,3 +372,7 @@ pt p s = parse p "" <$> tokenizeString s
 ts = tokenizeString
 
 
+ifs = "if true then\n\
+      \   return 2\n\
+      \else\n\
+      \   f()"
