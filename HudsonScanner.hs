@@ -4,6 +4,7 @@ module HudsonScanner
     ( removeJunk
     , removeUnnecessary
     , keywordString
+    , tss
     , tokenize
     , Token
     , tokenizeHudsonFile
@@ -73,7 +74,8 @@ data Keyword = AndKW       | AssertKW   | ClassKW  | ConstantKW | DoKW
 data Operator = PlusOp    | MinusOp    | MultiplyOp | DivideOp
               | ModulusOp | EqualityOp | TypeTestOp | GreaterEqOp
               | GreaterOp | LessEqOp   | LessOp     | ConcatenateOp
-                deriving (Eq, Show)
+              | NotEqOp
+                deriving (Enum, Eq, Show)
 
 data Separator = AssignSep | ColonSep | CommaSep | LParenSep | RParenSep
                  deriving (Eq, Show)
@@ -104,13 +106,11 @@ removeUnnecessary = filter f
 -- comment.
 offside :: [Token] -> [Token]
 offside [] = []
-offside ts = off [head ts] ts
+offside ts = off [] ts
     where
-
       -- | Traverse the tokens and insert indent and outdent tokens.
       -- Keep a stack of column positions so we can properly outdent
       -- multiple levels.
-
       off :: [Token]            -- ^ the stack of indents
           -> [Token]            -- ^ the list of tokens
           -> [Token]
@@ -119,11 +119,14 @@ offside ts = off [head ts] ts
       -- stack, but it doesn't change indentation.
       off stk [] = replicate (length stk - 1) (OutdentTok, pos . last $ ts)
 
-      -- Tokens that don't affect indentation
       off stk (x@(NewlineTok, _):xs)       = x:(off stk xs)
-      off stk (x@(JunkTok, _):xs)          = x:(off stk xs)
-      off stk (x@(ContCommentTok _, _):xs) = x:(off stk xs)
-      off stk (x@(CommentTok _, _):xs)     = x:(off stk xs)
+      -- Tokens that we don't want and don't affect indentation.
+      off stk (x@(JunkTok, _):xs)          = off stk xs
+      off stk (x@(ContCommentTok _, _):xs) = off stk xs
+      off stk (x@(CommentTok _, _):xs)     = off stk xs
+
+      -- We need a start token for indentation.
+      off [] tss@(t:ts) = off [t] tss
 
       -- Compare the relative indentation of the current token @t@ to
       -- the top of the indentation stack @s@.  When less, insert the
@@ -142,15 +145,17 @@ offside ts = off [head ts] ts
             -- closed.
             outdents = replicate (length closed) (OutdentTok, pos t)
             
-            spanToNewline = span f tss
-                where f (NewlineTok, _) = False
-                      f _               = True
-            (lineCode, restCode) = spanToNewline
+            (lineCode, restCode) = spanToNewline tss
+
       x `dedents` s = col x < col s
       x `indents` s = col x > col s
       col = sourceColumn . pos
       line = sourceLine . pos
       pos = snd
+
+      spanToNewline ts = span f ts
+          where f (NewlineTok, _) = False
+                f _               = True
 
 -- | Return the string representation of a list of CharPos.
 toString :: [CharPos] -> String
@@ -252,11 +257,13 @@ identifier = mkToken (objMember <|> ident) toTok
 -- | Association list of hudson operators with an abstract
 -- representation.
 hudsonOperators = [("+", PlusOp),     ("-",  MinusOp),
-                   ("*", MultiplyOp), ("/",  DivideOp),
+                   ("*", MultiplyOp), ("/=", NotEqOp),
                    ("%", ModulusOp),  ("=",  EqualityOp),
                    ("?", TypeTestOp), (">=", GreaterEqOp),
                    (">", GreaterOp),  ("<=", LessEqOp),
-                   ("<", LessOp),     ("&",  ConcatenateOp)]
+                   ("<", LessOp),     ("&",  ConcatenateOp),
+                   ("/", DivideOp)
+                  ]
 
 -- TODO: Generalize this, possibly using mkToken
 tryOperator (s, o) = do (x:_) <- try (string s)
@@ -331,3 +338,5 @@ example = liftM fromRight $ tokenizeHudsonFile "test1.hud"
     where fromRight (Right a)  = a
 
 tokenizeString s = removeUnnecessary <$> offside <$> parse tokenize "" (prelex s "")
+
+tss s = parse tokenize "" (prelex s "")
