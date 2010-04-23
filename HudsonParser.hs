@@ -8,6 +8,7 @@ import Control.Monad
 import Control.Monad.Identity (Identity)
 import Control.Applicative ((<*), (*>), (<*>), (<$>), liftA)
 
+import Data.List (foldl')
 import Text.Parsec ((<?>), (<|>))
 import Text.Parsec.Combinator
 import Text.Parsec.Expr
@@ -22,8 +23,9 @@ data Block = BlockStmt Stmt
 type VarID = String
 type ClassID = String
 
-data Stmt = Assignment VarID Expr
+data Stmt = Assignment Expr Expr
           | ProcCall VarID [Expr]
+          | ObjCall Expr
           | If {ifCond :: Expr, thenCode :: [Block], elseCode :: [Block]}
           | While {whileCond :: Expr, whileCode :: [Block]}
           | Return (Maybe Expr)
@@ -64,6 +66,7 @@ data Expr = LiteralInt Integer
           | LiteralStr String
           | LiteralBool Bool
           | LiteralNull
+          | LiteralThis
           | ClassLookup ClassID
           | Negate Expr
           | Not Expr
@@ -71,11 +74,21 @@ data Expr = LiteralInt Integer
           | VarLookup VarID
           | FuncCall VarID [Expr]
           | ClassCall ClassID [Expr]
-          | TypeTest Expr String
+          | ObjFieldExpr { fieldName :: VarID
+                         , fieldObjExpr :: Expr
+                         }
+          | ObjMethodExpr { methodName :: VarID
+                          , methodActuals :: [Expr]
+                          , methodObjExpr :: Expr
+                          }
           | LambdaExpr { lambdaParams :: [Param]
                        , lambdaExpr :: Expr
                        }
             deriving (Eq, Show)
+
+data ObjAST = ObjFieldLookup VarID
+            | ObjMethodCall VarID [Expr]
+              deriving (Eq, Show)
 
 data BinaryOp = Add
               | Sub
@@ -85,6 +98,7 @@ data BinaryOp = Add
               | Equal
               | NotEqual
               | LessThan
+              | TypeTest  -- TODO: Should the right be a classID?
               | LessThanEqual
               | GreaterThan
               | GreaterThanEqual
@@ -94,6 +108,7 @@ data BinaryOp = Add
                 deriving (Enum, Eq, Show)
 
 type Parser t = Parsec [Token] () t
+
 
 -- TODO
 --
@@ -164,8 +179,8 @@ parseBlock = liftM BlockStmt parseStmt
          <?> "declaration or statemnt"
 
 parseStmt :: Parser Stmt
-parseStmt = choice [parseAssign, parseProcCall, parseIf, parseWhile,
-                    parseReturn, parseAssert, parseNull]
+parseStmt = choice [parseAssign, parseObjCall, parseProcCall, parseIf,
+                    parseWhile, parseReturn, parseAssert, parseNull]
         <?> "statement"
 
 parseDecl :: Parser Decl
@@ -183,18 +198,22 @@ tokenString (ContCommentTok s, _) = s
 tokenString (CommentTok s, _) = s
 tokenString _ = error "Can't make a string from a non-string token."
 
-parseAssign = try (do v <- lowerOrObjID
+parseAssign = try (do v <- parseExpr
                       separator AssignSep
                       e <- parseExpr
                       return $ Assignment v e
                   )
               <?> "assignment"
 
+parseActuals = parens (commaSep parseExpr) <?> "actual parameters"
+
 parseProcCall = try (do p <- lowerOrObjID
-                        ps <- parens (commaSep parseExpr) <?> "actual parameters"
+                        ps <- parseActuals
                         return $ ProcCall p ps
                     )
                 <?> "procedure call"
+
+parseObjCall = try (return ObjCall <*> parseObjExpr) <?> "object call"
 
 -- TODO: Layout for `else statement` not strictly enforced following a
 -- block `if statement`.
@@ -295,8 +314,37 @@ parseOptionalType = try (liftM Just (tokenString <$>
 -- Expressions
 parseExpr = buildExpressionParser table term <?> "expression"
 
+-- | Parse an expression that uses object methods or fields.  Start by
+-- parsing the subset of expressions that may have an object field or
+-- method.  We subset to avoid infinite recursion.  Then parse one or
+-- more object method calls or fields.  Finally, traverse the gathered
+-- calls and fields wrapping each around the previous item to build an
+-- expression.
+parseObjExpr = try (do e <- parens exprSubset <|> exprSubset 
+                       os <- many1 (parseObjMethodCall <|> parseObjFieldLookup)
+                       return $ foldl' f e os
+                   )
+               <?> "object expression"
+    where f :: Expr -> ObjAST -> Expr
+          f expr (ObjMethodCall n ps) = ObjMethodExpr n ps expr
+          f expr (ObjFieldLookup n)   = ObjFieldExpr n expr
+          -- TODO: Did we miss any other expressions that can have
+          -- object fields or methods.
+          exprSubset = choice [parseFuncCall, parseClassCall, parseThis,
+                               parseClassLookup, parseVarLookup]
+
+parseObjMethodCall = try (do n <- objMemberID
+                             ps <- parseActuals
+                             return $ ObjMethodCall n ps
+                         )
+                     <?> "object method call"
+
+parseObjFieldLookup = (return ObjFieldLookup <*> objMemberID) <?> "object field"
+
 term = parseLambdaExpr
+   <|> parseObjExpr
    <|> parseFuncCall
+   <|> parseThis
    <|> parseTrue
    <|> parseFalse
    <|> parseClassCall
@@ -308,8 +356,8 @@ term = parseLambdaExpr
    <|> parens parseExpr
    <?> "simple expresion"
 
-table   = [ -- TODO (. field acces, () func call, ? type test)
-            [prefix MinusOp Negate, prefixKW NotKW Not]
+table   = [ [binaryLeft (TypeTestOp, TypeTest)]
+          , [prefix MinusOp Negate, prefixKW NotKW Not]
           , [binaryLeft es | es <- [(MultiplyOp, Mult), (DivideOp, Div),
                                     (ModulusOp, Mod)]]
           , [binaryLeft es | es <- [(PlusOp, Add), (MinusOp, Sub),
@@ -367,12 +415,11 @@ parseString = do (StringTok s, _) <- string
 parseTrue = reserved TrueKW >> (return $ LiteralBool True) <?> "true"
 parseFalse = reserved FalseKW >> (return $ LiteralBool False) <?> "false"
 parseExprNull = reserved NullKW >> (return $ LiteralNull) <?> "null"
-  
+parseThis = reserved ThisKW >> (return $ LiteralThis) <?> "this"  
 pt p s = parse p "" <$> tokenizeString s
 ts = tokenizeString
 
 
 ifs = "if true then\n\
-      \   return 2\n\
-      \else\n\
-      \   f()"
+      \   e()\n\
+      \else f()"
