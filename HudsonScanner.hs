@@ -87,7 +87,7 @@ tokenizeHudsonFile :: String -> IO (Either ParseError [Token])
 tokenizeHudsonFile fname = do
   input <- readFile fname
   let lexed = prelex input fname
-  return $ removeUnnecessary <$> offside <$> parse tokenize fname lexed
+  return $ offside <$> removeUnnecessary <$> parse tokenize fname lexed
 
 -- | Remove junk tokens
 removeJunk :: [Token] -> [Token]
@@ -99,6 +99,7 @@ removeJunk = filter f
 removeUnnecessary = filter f
     where f (JunkTok, _) = False
           f (CommentTok _, _) = False
+          f (ContCommentTok _, _) = False
           f _ = True
 
 -- | Insert Indent and Outdent tokens into the list.  Like foldr, but
@@ -125,8 +126,9 @@ offside ts = off [] ts
       off stk (x@(ContCommentTok _, _):xs) = off stk xs
       off stk (x@(CommentTok _, _):xs)     = off stk xs
 
-      -- We need a start token for indentation.
-      off [] tss@(t:ts) = off [t] tss
+      -- We need a start token for indentation that affects
+      -- indentation.
+      off [] tss@(t:ts) = off [t] tss -- TODO: Check to see if it's in col 1
 
       -- Compare the relative indentation of the current token @t@ to
       -- the top of the indentation stack @s@.  When less, insert the
@@ -182,7 +184,7 @@ satisfy f = tokenPrim (\cp -> show [(cpChar cp)])
                       (\cp -> if f (cpChar cp) then Just cp else Nothing)
 
 char c   = satisfy (==c) <?> show [c]
-space    = satisfy isSpace <?> "space"
+space    = satisfy (==' ') <?> "space"
 spaces   = many1 space <?> "white space"
 upper    = satisfy isUpper <?> "uppercase letter"
 lower    = satisfy isLower <?> "lowercase letter"
@@ -241,7 +243,7 @@ objMember = char '.' <:> lower <:> many idChar <?> "class method or variable nam
 -- | Match any identifier. 
 ident = alpha <:> many idChar
 
-idChar = alphaNum <|> char '_' <|> char '.'
+idChar = alphaNum <|> char '_'
 
 -- | Parse an identifier and classify it as reserved word, lowercase
 -- identifier, uppercase identifier or object method name.
@@ -285,10 +287,16 @@ contComment = mkToken' (try (string "##") >> manyTill anyChar newline)
                        (ContCommentTok . toString)
                        (ContCommentTok "")
 
+manyTill' p end = scan
+    where scan  = end <|> (p <:> scan)
+
 -- | Tokenize a regular comment.
-comment = mkToken' (char '#' >> manyTill anyChar newline)
+comment = mkToken' (char '#' >> manyTill anyChar (lookAhead newline)) -- TODO: eof too?
                    (CommentTok . toString)
                    (CommentTok "")
+    where
+      incLastSource :: [CharPos] -> SourcePos
+      incLastSource cs = flip incSourceColumn 1 . cpPos . last $ cs
 
 newlinetok = mkToken newline (return NewlineTok)
 
