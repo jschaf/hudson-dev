@@ -1,0 +1,4 @@
+if false then
+    t()            
+else
+    null

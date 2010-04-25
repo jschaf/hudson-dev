@@ -1,0 +1,2 @@
+class Joe inherit Blah < One, Two is
+    null

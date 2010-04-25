@@ -1,0 +1,508 @@
+class DtFuncs is
+    constant .plus := fun (a, b) is a + b
+    constant .minus := fun (a, b) is a - b
+    constant .eq := fun (a, b) is a = b
+    constant .notEq := fun (a, b) is a /= b
+    constant .compose := fun (f, g) is fun (x) is f(g(x))
+    constant .apply := fun (f, a) is f(a)
+    constant .flip := fun (f, a, b) is f(b, a)
+    constant .append := .flip(.foldr(List))
+    constant .head := fun (l) is l.item
+    constant .tail := fun (l) is l.next
+    constant .id := fun (a) is a
+    constant .const := fun (a, b) is a
+    constant .on := fun (f, g, a, b) is f(g(a), g(b))
+    constant .length := .foldr(.const(.plus(1)), 0)
+    function .map(f, list) is
+        if list = null then
+            return null
+        else
+            return List(f(list.item), .map(f, list.next))
+    function .foldr(f, base, list) is
+        if list = null then
+            return base
+        else
+            return f(list.item, .foldr(f, base, list.next))
+    function .foldr1(f, list) is
+        if list = null then
+            return error("foldr1 empty list")
+        if list.next = null then
+            return list.item
+        else
+            return f(list.item, .foldr1(f, list.next))
+    function .foldl(f, base, list) is
+        if list = null then
+            return base
+        else
+            return .foldl(f, f(list.item, base), list.next)
+    function .foldl1(f, list) is
+        if list = null then
+            error("foldl1 empty list")
+        else
+            return .foldl(f, list.item, list.next)
+    function .init(list) is
+        if list = null then
+            error("Can't init an empty list.")
+        else
+            if list.next = null then
+                return null
+            else
+                return List(list.item, .init(list.next))
+    function .filter(pred, list) is
+        if list = null then
+            return null
+        else
+            if pred(list.item) then
+                return List(list.item, .filter(pred, list.next))
+            else
+                return .filter(pred, list.next)
+    function .zipWith(f, as, bs) is
+        if as = null or bs = null then
+            return null
+        else
+            return List(f(as.item, bs.item), .zipWith(f, as.next, bs.next))
+    function .take(n, l) is
+        if l = null then
+            return null
+        else
+            if n <= 0 then
+                return null
+            else
+                return List(l.item, .take(n - 1, l.next))
+    function .drop(n, l) is
+        if l = null then
+            return null
+        else
+            if n <= 0 then
+                return l
+            else
+                return .drop(n - 1, l.next)
+    function .replicate(n, x) is
+        if n < 1 then
+            return null
+        else
+            return List(x, .replicate(n - 1, x))
+    function .index(list, n) is
+        if n = 0 then
+            return list.item
+        else
+            return .index(list.next, n - 1)
+    function .lookup(a, alist) is
+        if alist = null then
+            return null
+        else
+            if a = alist.item.fst then
+                return alist.item.snd
+            else
+                return .lookup(a, alist.next)
+    function .delete(x, list) is
+        if list = null then
+            return null
+        else
+            if list.item = x then
+                return list.next
+            else
+                return List(list.item, .delete(x, list.next))
+    function .insertAt(n, item, list) is
+        return .append(.take(n, list), List(item, .drop(n, list)))
+    function .insert(x, ys) is
+        return .insertBy(.compare, x, ys)
+    function .insertBy(cmp, x, ys) is
+        if ys = null then
+            return List(x, null)
+        else
+            constant c := cmp(x, ys.item)
+            if c = 1 then
+                return List(ys.item, .insertBy(cmp, x, ys.next))
+            else
+                return List(x, ys)
+    function .any(pred, xs) is
+        if xs = null then
+            return false
+        else
+            return pred(xs.item) or .any(pred, xs.next)
+    function .all(pred, xs) is
+        if xs = null then
+            return false
+        else
+            return pred(xs.item) or .all(pred, xs.next)
+    function .elem(x, ys) is
+        return .any(.eq(x))
+    function .element(x, ys) is
+        if ys = null then
+            return false
+        else
+            return x.equals(ys.item) or .element(x, ys.next)
+    function .sort(xs) is
+        return .sortBy(.compare, xs)
+    function .sortBy(cmp, xs) is
+        return .foldr(.insertBy(cmp), null, xs)
+    function .range(lo, hi) is
+        if lo > hi then
+            return null
+        else
+            return List(lo, .range(lo + 1, hi))
+    constant difference := .foldl(.delete)
+    function .minimum(xs) is
+        return .foldl1(.min, xs)
+    function .minimumBy(pred, xs) is
+        function minBy(a, b) is
+            if pred(a, b) > 0 then
+                return b
+            else
+                return a
+        return .foldl1(minBy, xs)
+    function .compare(a, b) is
+        if a = b then
+            return 0
+        else
+            if a > b then
+                return 1
+            else
+                return -1
+    function .abs(a) is
+        if a >= 0 then
+            return a
+        else
+            return -a
+    function .max(a, b) is
+        if a > b then
+            return a
+        else
+            return b
+    function .min(a, b) is
+        if a > b then
+            return b
+        else
+            return a
+    constant .sign := .flip(.compare, 0)
+    procedure .foreach(proc, list) is
+        if list = null then
+            return
+        else
+            proc(list.item)
+            .foreach(proc, list.next)
+    function .randomRange(lo, hi) is
+        return random(hi - lo + 1) + lo
+    function .randomChoice(list) is
+        return .index(list, random(.length(list)))
+    constant .fst := fun (t) is t.fst
+    constant .snd := fun (t) is t.snd
+    function .list1(a) is
+        return List(a, null)
+    function .list2(a, b) is
+        return List(a, .list1(b))
+    function .list3(a, b, c) is
+        return List(a, .list2(b, c))
+    function .list4(a, b, c, d) is
+        return List(a, .list3(b, c, d))
+    function .list5(a, b, c, d, e) is
+        return List(a, .list4(b, c, d, e))
+    function .list6(a, b, c, d, e, f) is
+        return List(a, .list5(b, c, d, e, f))
+    function .list7(a, b, c, d, e, f, g) is
+        return List(a, .list6(b, c, d, e, f, g))
+    function .list8(a, b, c, d, e, f, g, h) is
+        return List(a, .list7(b, c, d, e, f, g, h))
+class DtTuple is
+    constant .fst 
+    constant .snd 
+    function .minusTuple(tup) is
+        return DtTuple(.fst - tup.fst, .snd - tup.snd)
+    function .plusTuple(tup) is
+        return DtTuple(.fst + tup.fst, .snd + tup.snd)
+    function .equals(tup) is
+        return .fst = tup.fst and .snd = tup.snd
+    function .toString() is
+        return "Tuple(" & .fst & ", " & .snd & ")"
+    function .lookup(alist) is
+        if alist = null then
+            return null
+        else
+            if .equals(alist.item.fst) then
+                return alist.item.snd
+            else
+                return .lookup(alist.next)
+    function .abs() is
+        return DtTuple(dt.abs(.fst), dt.abs(.snd))
+    function .sum() is
+        return .fst + .snd
+    function .distanceFrom(pt) is
+        return this.minusTuple(pt).abs().sum()
+constant dt := DtFuncs()
+constant dtDEBUG := 0
+procedure dtShow(lvl, str) is
+    if lvl <= dtDEBUG then
+        writeLine(str)
+class DtQueen inherit Queen < Queen is
+    constant .teamName := "DTRush"
+    variable turn := 0
+    constant factory := DtAntFactory()
+    procedure .takeTurn() is
+        turn := turn + 1
+        if turn % 10 = 0 then
+            dtShow(2, "Turn " & turn)
+        if .canMove(north) then
+            .layEgg(factory.nextAnt())
+class DtPoint inherit DtTuple < DtTuple is
+    function .toDirection(dir) is
+        return this.plusTuple(dt.lookup(dir, dtDirectionAList))
+class DtAntFactory is
+    variable blockPoints := dt.list3(DtPoint(1, 37), DtPoint(0, 36), DtPoint(-1, 37))
+    variable numAnts := 0
+    function .nextAnt() is
+        numAnts := numAnts + 1
+        variable ant := null
+        if numAnts <= 1 then
+            ant := DtRunnerAnt().init(dt.list3(DtStageStrategy(DtPoint(-4, 35)), DtStageStrategy(DtPoint(-2, 40)), DtSimpleAttack(north)))
+        else
+            if numAnts <= 2 then
+                ant := DtGuardAnt().init(DtPatrolStrategy(dt.list3(DtPoint(3, 1), DtPoint(-3, 1), DtPoint(0, 20))))
+            else
+                if numAnts <= 6 then
+                    ant := DtGathererAnt().init(DtGatherStrategy())
+                else
+                    if numAnts <= 9 then
+                        ant := DtBlockerAnt().init(dt.list3(DtStageStrategy(DtPoint(-4, 5)), DtStageStrategy(DtPoint(-4, 35)), DtStageStrategy(blockPoints.item)))
+                        dtShow(1, blockPoints)
+                        blockPoints := blockPoints.next
+                    else
+                        if numAnts <= 14 then
+                            ant := DtGathererAnt().init(DtGatherStrategy())
+                        else
+                            if numAnts <= 15 then
+                                ant := DtGuardAnt().init(DtPatrolStrategy(dt.list5(DtPoint(3, 1), DtPoint(-3, 1), DtPoint(-10, 20), DtPoint(0, 20), DtPoint(10, 20))))
+                            else
+                                ant := DtGathererAnt().init(DtGatherStrategy())
+        return ant
+constant dtGatherPoints := dt.list4(DtPoint(-1, 0), DtPoint(-1, 1), DtPoint(0, 1), DtPoint(1, 1))
+constant dtDirections := dt.list5(north, south, east, west, here)
+constant dtDirectionVectors := dt.list5(DtPoint(1, 0), DtPoint(-1, 0), DtPoint(0, 1), DtPoint(0, -1), DtPoint(0, 0))
+constant dtDirectionAList := dt.zipWith(DtTuple, dtDirections, dtDirectionVectors)
+class DtAnt inherit Ant < Ant is
+    variable .moveStrategies := null
+    function .init(strategies) is
+        if strategies ? DtMoveStrategy then
+            strategies := dt.list1(strategies)
+        .moveStrategies := dt.map(fun (s) is s.init(this), strategies)
+        return this
+    function .foodDirection() is
+        function foodDir(a, b) is
+            if .lookForFood(a) /= 0 then
+                return a
+            else
+                return b
+        return dt.foldr(foodDir, null, dtDirections)
+    function .enemyDirection() is
+        function enemyDir(a, b) is
+            if .lookForEnemy(a) then
+                return a
+            else
+                return b
+        return dt.foldr(enemyDir, null, dtDirections)
+    function .location() is
+        return DtPoint(.northOfQueen(), .eastOfQueen())
+    function .hasFood() is
+        return .currentLoad() > 0
+    function .isAt(point) is
+        return .location().equals(point)
+    procedure .gotoPoint(pt) is
+        constant vec := pt.minusTuple(.location())
+        dtShow(4, "postition & target " & .location() & " " & pt)
+        if vec.equals(DtPoint(0, 0)) then
+            return
+        variable rightDirs := null
+        variable wrongDirs := null
+        function insertRandom(item, list) is
+            return dt.insertAt(random(dt.length(list) + 1), item, list)
+        if vec.fst > 0 then
+            rightDirs := List(north, rightDirs)
+            wrongDirs := List(south, wrongDirs)
+        else
+            if vec.fst = 0 then
+                wrongDirs := dt.list2(north, south)
+            else
+                rightDirs := List(south, rightDirs)
+                wrongDirs := List(north, wrongDirs)
+        if vec.snd > 0 then
+            rightDirs := insertRandom(east, rightDirs)
+            wrongDirs := insertRandom(west, wrongDirs)
+        else
+            if vec.snd = 0 then
+                wrongDirs := dt.list2(east, west)
+            else
+                rightDirs := insertRandom(west, rightDirs)
+                wrongDirs := insertRandom(east, wrongDirs)
+        dtShow(5, "rightDirs: " & rightDirs)
+        dtShow(5, "wrongDirs: " & wrongDirs)
+        procedure moveIfPossible(dir) is
+            if .canMove(dir) then
+                .move(dir)
+        dt.foreach(moveIfPossible, rightDirs)
+        dt.foreach(moveIfPossible, wrongDirs)
+    procedure .takeTurn() is
+        if .moveStrategies.item.finishedMoving() then
+            .moveStrategies := .moveStrategies.next
+        if .moveStrategies = null then
+            .moveStrategies := dt.list1(DtNoopStrategy())
+        .moveStrategies.item.makeMove()
+class DtGathererAnt inherit DtAnt < DtAnt is
+    constant .icon := "G"
+    constant .maxHealth := 1
+    constant .capacity := 418
+    constant .strength := 0
+class DtRunnerAnt inherit DtAnt < DtAnt is
+    constant .icon := "R"
+    constant .maxHealth := 3
+    constant .capacity := 0
+    constant .strength := 1
+class DtBlockerAnt inherit DtAnt < DtAnt is
+    constant .icon := "B"
+    constant .maxHealth := 15
+    constant .capacity := 0
+    constant .strength := 0
+class DtGuardAnt inherit DtAnt < DtAnt is
+    constant .icon := "X"
+    constant .maxHealth := 21
+    constant .capacity := 0
+    constant .strength := 6
+class DtMoveStrategy is
+    variable .ant: Ant := null
+    function .init(ant) is
+        .ant := ant
+        return this
+    function .finishedMoving() is
+        error("Undefined.")
+    procedure .makeMove() is
+        error("Undefined.")
+class DtStageStrategy inherit DtMoveStrategy < DtMoveStrategy is
+    constant stagePoint 
+    function .finishedMoving() is
+        return .ant.isAt(stagePoint)
+    procedure .makeMove() is
+        .ant.gotoPoint(stagePoint)
+class DtSimpleAttack inherit DtMoveStrategy < DtMoveStrategy is
+    constant direction 
+    function .finishedMoving() is
+        return false
+    procedure .makeMove() is
+        if .ant.lookForEnemy(direction) and .ant.strength > 0 then
+            .ant.attack(direction)
+class DtNoopStrategy inherit DtMoveStrategy < DtMoveStrategy is
+    function .finishedMoving() is
+        return false
+    procedure .makeMove() is
+        null
+class DtPatrolStrategy inherit DtMoveStrategy < DtMoveStrategy is
+    constant pointList 
+    constant pointsLength := dt.length(pointList)
+    variable pointIndex := 0
+    variable nextPoint := pointList.item
+    function .finishedMoving() is
+        return false
+    procedure .makeMove() is
+        if .ant.enemyDirection() /= null then
+            .ant.attack(.ant.enemyDirection())
+            return
+        if .ant.isAt(nextPoint) then
+            pointIndex := (pointIndex + 1) % pointsLength
+            nextPoint := dt.index(pointList, pointIndex)
+            .ant.gotoPoint(nextPoint)
+        else
+            .ant.gotoPoint(nextPoint)
+class DtGatherStrategy inherit DtMoveStrategy < DtMoveStrategy is
+    function .finishedMoving() is
+        return false
+    constant knownFoodPoints: List := dt.list3(DtPoint(0, 20), DtPoint(10, 20), DtPoint(-10, 20))
+    variable foundFoodPoints := null
+    variable foodPoint := dt.randomChoice(knownFoodPoints)
+    function distanceToKnownFood() is
+        return foodPoint.distanceFrom(.ant.location())
+    function closestGatherPoint() is
+        return dt.minimumBy(dt.on(dt.compare, fun (a) is a.distanceFrom(.ant.location())), dtGatherPoints)
+    function message() is
+        constant oldMsg := .ant.lookForMessage(here)
+        constant msg := foodPoint.distanceFrom(.ant.location())
+        if msg < oldMsg or oldMsg = 0 then
+            return msg + 1
+        else
+            return oldMsg
+    variable nextPheromonePoint := DtPoint(2, 3)
+    variable lastPheromonePoint := DtPoint(2, 3)
+    variable ignorePheromones := 0
+    function foodPheromone() is
+        function pheromoneDir(dir) is
+            constant msg := .ant.lookForMessage(dir)
+            if msg > 0 and msg < 70 then
+                return DtTuple(dir, msg)
+            else
+                return null
+        return dt.sortBy(dt.on(dt.compare, dt.snd), dt.filter(dt.notEq(null), dt.map(pheromoneDir, dtDirections)))
+    procedure pickNewFoodPoint() is
+        if foundFoodPoints /= null then
+            foodPoint := foundFoodPoints.item
+            foundFoodPoints := foundFoodPoints.next
+        else
+            foodPoint := dt.randomChoice(knownFoodPoints)
+    procedure storeOldFoodPoint() is
+        if not (dt.element(foodPoint, dt.append(foundFoodPoints, knownFoodPoints))) then
+            foundFoodPoints := List(foodPoint, foundFoodPoints)
+    variable phFoodDirection := null
+    variable phFoodDistance := null
+    procedure .makeMove() is
+        dtShow(2, "  loc: " & .ant.location())
+        dtShow(2, "  foundFood: " & foundFoodPoints)
+        if ignorePheromones > 0 then
+            ignorePheromones := ignorePheromones - 1
+        if foodPheromone() /= null then
+            phFoodDirection := foodPheromone().item.fst
+            phFoodDistance := foodPheromone().item.snd
+        else
+            phFoodDirection := null
+            phFoodDistance := null
+        if .ant.hasFood() then
+            if dt.any(dt.eq(true), dt.map(fun (pt) is .ant.isAt(pt), dtGatherPoints)) then
+                .ant.drop()
+            else
+                if .ant.isAt(foodPoint) and .ant.lookForFood(here) = 0 then
+                    .ant.leaveMessage(0)
+                    pickNewFoodPoint()
+                    .ant.gotoPoint(closestGatherPoint())
+                else
+                    if .ant.foodDirection() /= null then
+                        dtShow(2, "  new food pt")
+                        storeOldFoodPoint()
+                        foodPoint := .ant.location().toDirection(.ant.foodDirection())
+                    .ant.leaveMessage(message())
+                    .ant.gotoPoint(closestGatherPoint())
+        else
+            if .ant.isAt(foodPoint) then
+                if .ant.lookForFood(here) = 0 then
+                    dtShow(2, "  empty food point")
+                    .ant.leaveMessage(0)
+                    pickNewFoodPoint()
+                    .ant.gotoPoint(foodPoint)
+                else
+                    .ant.leaveMessage(message())
+                    .ant.pickup()
+            else
+                if .ant.foodDirection() /= null then
+                    dtShow(2, "  Found food point")
+                    storeOldFoodPoint()
+                    foodPoint := .ant.location().toDirection(.ant.foodDirection())
+                    .ant.gotoPoint(foodPoint)
+                else
+                    if foodPheromone() = null then
+                        .ant.gotoPoint(foodPoint)
+                        dtShow(2, "  no ph")
+                    else
+                        if (ignorePheromones > 0 and phFoodDistance /= 0 and phFoodDistance < distanceToKnownFood()) then
+                            if phFoodDistance <= 1 and .ant.foodDirection() = null then
+                                ignorePheromones := 10
+                                .ant.gotoPoint(foodPoint)
+                            else
+                                nextPheromonePoint := .ant.location().toDirection(phFoodDirection)
+                                .ant.gotoPoint(nextPheromonePoint)
+                        else
+                            .ant.gotoPoint(foodPoint)
+registerQueen(DtQueen)

@@ -1,0 +1,7 @@
+function .nextAnt() is
+    if true then 
+        tom()
+
+    else 
+        mare()
+        

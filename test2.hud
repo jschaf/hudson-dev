@@ -1,0 +1,32 @@
+constant length := foldr(fun(x,y) is y+1, 0)
+constant compose := fun(f,g) is fun(x) is f(g(x))
+constant flip := fun(f,x,y) is f(y,x)
+constant append := flip(foldr(List))
+constant flatten := foldr(append, null)
+constant flattenMap := fun(f) is foldr(compose(append, f), null)
+
+function intersperse(x,list) is
+   function glue(item, lol) is
+      variable first := lol.item.next
+      variable rest := List(x, List(item, first))
+      return List(rest,         ##
+                  map(List(item),lol))
+   
+   return foldr(glue ,List(List(x,null),null), list)
+   
+function permutations(list) is
+    constant step := fun(item) is flattenMap(intersperse(item))
+    return foldr(step, List(null,null), list)
+   
+# use map/foldr whenever appropriate
+function map(f,list) is
+   if list=null then return null
+   else return List(f(list.item), map(f,list.next))
+
+function foldr(f,base,list) is
+   if list=null then return base
+   else return f(list.item, foldr(f,base,list.next))
+
+function range(lo,hi) is
+    if lo > hi then return null
+    else return List(lo, range(lo+1, hi))
