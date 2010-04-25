@@ -4,11 +4,10 @@ module HudsonScanner
     ( removeJunk
     , removeUnnecessary
     , keywordString
-    , tss
-    , tokenize
     , Token
     , tokenizeHudsonFile
     , tokenizeString
+    , tokenizeString'
     , Tok(..)
     , Separator(..)
     , Operator(..)
@@ -45,6 +44,8 @@ instance Eq CharPos where
 
 instance Ord CharPos where
     compare = compare `on` cpChar
+
+type CharPosParser t = Parsec [CharPos] () t
 
 type Token  = (Tok, SourcePos)
 
@@ -83,11 +84,13 @@ data Separator = AssignSep | ColonSep | CommaSep | LParenSep | RParenSep
 keywordString :: Keyword -> String
 keywordString = map toLower . init . init . show
 
+tokenizeString s = tokenizeString' "" s
+tokenizeString' fname s = offside <$> removeUnnecessary <$> parse tokenize fname (prelex s "")
+
 tokenizeHudsonFile :: String -> IO (Either ParseError [Token])
 tokenizeHudsonFile fname = do
   input <- readFile fname
-  let lexed = prelex input fname
-  return $ offside <$> removeUnnecessary <$> parse tokenize fname lexed
+  return $ tokenizeString' fname input
 
 -- | Remove junk tokens
 removeJunk :: [Token] -> [Token]
@@ -338,13 +341,4 @@ stringLiteral = do pos <- getPosition
       escMap pos = zip "abfnrtv\\\"\'"
                        (map (flip CharPos pos) "\a\b\f\n\r\t\v\\\"\'")
 
-type CharPosParser t = Parsec [CharPos] () t
 
-test p s = parseTest p (prelex s "")
-
-example = liftM fromRight $ tokenizeHudsonFile "test1.hud"
-    where fromRight (Right a)  = a
-
-tokenizeString s = removeUnnecessary <$> offside <$> parse tokenize "" (prelex s "")
-
-tss s = parse tokenize "" (prelex s "")
