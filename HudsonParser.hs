@@ -8,9 +8,10 @@ import Control.Monad
 import Control.Monad.Identity (Identity)
 import Control.Applicative ((<*), (*>), (<*>), (<$>), liftA)
 
-import Data.List (foldl')
+import Data.List (foldl', intercalate)
 import Text.Parsec ((<?>), (<|>))
 import Text.Parsec.Combinator
+import Text.Parsec.Error
 import Text.Parsec.Expr
 import Text.Parsec.Prim
 import Text.Parsec.Pos
@@ -74,6 +75,7 @@ data Expr = LiteralInt Integer
           | VarLookup VarID
           | FuncCall VarID [Expr]
           | ClassCall ClassID [Expr]
+          | ParenExpr Expr
           | ObjFieldExpr { fieldName :: VarID
                          , fieldObjExpr :: Expr
                          }
@@ -110,17 +112,19 @@ data BinaryOp = Add
 type Parser t = Parsec [Token] () t
 
 
--- TODO
---
--- Create expression parser.
-
 parseFile fname = do
-  ts <- tokenizeHudsonFile fname
-  return $ parse parseBlocks fname <$> ts
-  -- case ts of
-  --   Left err -> print err
-  --   Right xs -> print (removeJunk xs)
+  ss <- readFile fname
+  return $ parseString' fname ss
 
+parseString s = parseString' "" s
+
+parseString' fname s = 
+  case tokenizeString' fname s of
+    Left err -> Left (show err)
+    Right xs ->
+        case parse parseBlocks fname xs of
+          Left err -> Left (show err)
+          Right ps -> Right ps
 
 tokenP :: (Stream [Token] Identity Token) => Token -> Parser Token
 tokenP x = token showTok posFromTok testTok
@@ -316,10 +320,10 @@ parseExpr = buildExpressionParser table term <?> "expression"
 
 -- | Parse an expression that uses object methods or fields.  Start by
 -- parsing the subset of expressions that may have an object field or
--- method.  We subset to avoid infinite recursion.  Then parse one or
--- more object method calls or fields.  Finally, traverse the gathered
--- calls and fields wrapping each around the previous item to build an
--- expression.
+-- method.  We use a subset to avoid infinite recursion.  Then parse
+-- one or more object method calls or fields.  Finally, traverse the
+-- gathered calls and fields wrapping each around the previous item to
+-- build an expression.
 parseObjExpr = try (do e <- parens exprSubset <|> exprSubset 
                        os <- many1 (parseObjMethodCall <|> parseObjFieldLookup)
                        return $ foldl' f e os
@@ -352,8 +356,8 @@ term = parseLambdaExpr
    <|> parseExprNull
    <|> parseVarLookup
    <|> parseInteger
-   <|> parseString
-   <|> parens parseExpr
+   <|> parseLiteralString
+   <|> parseParenExpr
    <?> "simple expresion"
 
 table   = [ [binaryLeft (TypeTestOp, TypeTest)]
@@ -408,9 +412,11 @@ parseInteger = do (NumberTok n, _) <- numberTag
                   return $ LiteralInt n
               <?> "integer"
 
-parseString = do (StringTok s, _) <- string
-                 return $ LiteralStr s
-              <?> "literal string"
+parseLiteralString = do (StringTok s, _) <- string
+                        return $ LiteralStr s
+                     <?> "literal string"
+
+parseParenExpr = return ParenExpr <*> parens parseExpr
 
 parseTrue = reserved TrueKW >> (return $ LiteralBool True) <?> "true"
 parseFalse = reserved FalseKW >> (return $ LiteralBool False) <?> "false"
