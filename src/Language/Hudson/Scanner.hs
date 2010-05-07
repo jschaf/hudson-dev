@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 
-module HudsonScanner
+module Language.Hudson.Scanner
     ( removeJunk
     , removeUnnecessary
     , keywordString
@@ -15,22 +15,20 @@ module HudsonScanner
     , (<:>)
     ) where
 
-import Control.Monad (msum, liftM)
-import Control.Applicative (Applicative, liftA, liftA2, (<$>))
+import Control.Monad (msum)
+import Control.Applicative (Applicative, liftA2, (<$>))
 import Control.Monad.Identity (Identity)
 
 import Data.Char
 import Data.Function (on)
-import Data.List (mapAccumR, mapAccumL, foldl')
+import Data.List (mapAccumL, foldl')
 
 import qualified Data.Map as Map
 
-import Text.Parsec ((<?>), parseTest, ParseError)
+import Text.Parsec ((<?>), ParseError)
 import Text.Parsec.Combinator
 import Text.Parsec.Prim
 import Text.Parsec.Pos
-
-import Text.Printf
 
 -- TODO:
 --
@@ -110,7 +108,7 @@ removeUnnecessary = filter f
 -- comment.
 offside :: [Token] -> [Token]
 offside [] = []
-offside ts = off [] ts
+offside zs = off [] zs
     where
       -- | Traverse the tokens and insert indent and outdent tokens.
       -- Keep a stack of column positions so we can properly outdent
@@ -121,17 +119,17 @@ offside ts = off [] ts
 
       -- Subtract one because we use the first token to initialize the
       -- stack, but it doesn't change indentation.
-      off stk [] = replicate (length stk - 1) (OutdentTok, pos . last $ ts)
+      off stk [] = replicate (length stk - 1) (OutdentTok, pos . last $ zs)
 
       off stk (x@(NewlineTok, _):xs)       = x:(off stk xs)
       -- Tokens that we don't want and don't affect indentation.
-      off stk (x@(JunkTok, _):xs)          = off stk xs
-      off stk (x@(ContCommentTok _, _):xs) = off stk xs
-      off stk (x@(CommentTok _, _):xs)     = off stk xs
+      off stk ((JunkTok, _):xs)          = off stk xs
+      off stk ((ContCommentTok _, _):xs) = off stk xs
+      off stk ((CommentTok _, _):xs)     = off stk xs
 
       -- We need a start token for indentation that affects
       -- indentation.
-      off [] tss@(t:ts) = off [t] tss -- TODO: Check to see if it's in col 1
+      off [] tss@(t:_) = off [t] tss -- TODO: Check to see if it's in col 1
 
       -- Compare the relative indentation of the current token @t@ to
       -- the top of the indentation stack @s@.  When less, insert the
@@ -140,7 +138,7 @@ offside ts = off [] ts
       -- the line and then continue after pushing the current token on
       -- the indentation stack.  When equal, insert the current line
       -- and then continue.
-      off stk@(s:ss) tss@(t:ts)
+      off stk@(s:_) tss@(t:_)
           | t `dedents` s = outdents ++ lineCode ++ off remaining restCode
           | t `indents` s = (IndentTok, pos t) : lineCode ++ off (t:stk) restCode
           | otherwise     = lineCode ++ off stk restCode
@@ -155,7 +153,6 @@ offside ts = off [] ts
       x `dedents` s = col x < col s
       x `indents` s = col x > col s
       col = sourceColumn . pos
-      line = sourceLine . pos
       pos = snd
 
       spanToNewline ts = span f ts
@@ -177,19 +174,19 @@ prelex' initial xs = snd $ mapAccumL step initial xs
       step srcPos c = (updatePosChar srcPos c, CharPos c srcPos)
 
 updatePos :: SourcePos -> CharPos -> SourcePos
-updatePos srcPos (CharPos c pos) = updatePosChar srcPos c
+updatePos srcPos (CharPos c _pos) = updatePosChar srcPos c
 
 -- TODO: This is reinventing the wheel but I don't know a better way.
 satisfy :: (Stream [CharPos] Identity CharPos) => (Char -> Bool)
           -> ParsecT [CharPos] () Identity CharPos
 satisfy f = tokenPrim (\cp -> show [(cpChar cp)])
-                      (\pos c cs -> updatePos pos c)
+                      (\pos c _cs -> updatePos pos c)
                       (\cp -> if f (cpChar cp) then Just cp else Nothing)
 
 char c   = satisfy (==c) <?> show [c]
 space    = satisfy (==' ') <?> "space"
 spaces   = many1 space <?> "white space"
-upper    = satisfy isUpper <?> "uppercase letter"
+-- upper    = satisfy isUpper <?> "uppercase letter"
 lower    = satisfy isLower <?> "lowercase letter"
 alpha    = satisfy isAlpha <?> "letter"
 alphaNum = satisfy isAlphaNum <?> "letter or digit"
@@ -205,10 +202,10 @@ tokenize = manyTill p eof
     where p = choice [newlinetok, spaceJunk, identifier, operator, separator,
                       integer, stringLiteral, contComment, comment]
 
-spaceJunk = spaces >>= (\(x:xs) -> return (JunkTok, cpPos x))
+spaceJunk = spaces >>= (\(x:_) -> return (JunkTok, cpPos x))
 
 integer = do
-  dss@(d:ds) <- many1 digit
+  dss@(d:_) <- many1 digit
   let n = toNum dss
   return (NumberTok n, cpPos d)
 
@@ -223,7 +220,7 @@ infixr 5 <:>
 
 -- | Return a token with the results of parser @p@ wrapped in @f@,
 -- with the source position set to the first character parsed.
-mkToken p f = do xss@(x:xs) <- p
+mkToken p f = do xss@(x:_) <- p
                  return (f xss, cpPos x)
 
 -- | Same as @mkToken@, but use @d@ as a default value if not input is
@@ -253,7 +250,7 @@ idChar = alphaNum <|> char '_'
 identifier = mkToken (objMember <|> ident) toTok
     where
       toTok xs = maybe (toID xs) ReservedTok (Map.lookup (toString xs) keywordMap)
-
+      toID [] = error "need at least one character for an identifier"
       toID ts@(t:_) | isUpper (cpChar t) = UpperIDTok $ toString ts
                     | isLower (cpChar t) = LowerIDTok $ toString ts
                     | cpChar t == '.'    = ObjMemberIDTok $ toString ts
@@ -290,16 +287,10 @@ contComment = mkToken' (try (string "##") >> manyTill anyChar newline)
                        (ContCommentTok . toString)
                        (ContCommentTok "")
 
-manyTill' p end = scan
-    where scan  = end <|> (p <:> scan)
-
 -- | Tokenize a regular comment.
 comment = mkToken' (char '#' >> manyTill anyChar (lookAhead newline)) -- TODO: eof too?
                    (CommentTok . toString)
                    (CommentTok "")
-    where
-      incLastSource :: [CharPos] -> SourcePos
-      incLastSource cs = flip incSourceColumn 1 . cpPos . last $ cs
 
 newlinetok = mkToken newline (return NewlineTok)
 

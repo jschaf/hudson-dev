@@ -1,21 +1,19 @@
 {-# LANGUAGE FlexibleContexts #-}
 
-module HudsonParser where
+module Language.Hudson.Parser where
 
-import HudsonScanner
+import Language.Hudson.Scanner
 
 import Control.Monad
 import Control.Monad.Identity (Identity)
-import Control.Applicative ((<*), (*>), (<*>), (<$>), liftA)
+import Control.Applicative ((<*>), (<$>))
 
-import Data.List (foldl', intercalate)
-import Text.Parsec ((<?>), (<|>))
+import Data.List (foldl')
+
 import Text.Parsec.Combinator
-import Text.Parsec.Error
 import Text.Parsec.Expr
 import Text.Parsec.Prim
 import Text.Parsec.Pos
-import Text.Printf
 
 data Block = BlockStmt Stmt
            | BlockDecl Decl
@@ -129,8 +127,8 @@ parseString' fname s =
 tokenP :: (Stream [Token] Identity Token) => Token -> Parser Token
 tokenP x = token showTok posFromTok testTok
     where
-      showTok (t , pos) = show t
-      posFromTok (t, pos)  = pos
+      showTok (t , _pos) = show t
+      posFromTok (_t, pos)  = pos
       testTok tok = if equal x tok then Just tok else Nothing
 
 -- TODO: This is ugly
@@ -224,10 +222,10 @@ parseObjCall = try (return ObjCall <*> parseObjExpr) <?> "object call"
 parseIf = do reserved IfKW
              cond <- parseExpr
              reserved ThenKW
-             ifCode <- parseCode
-             elseCode <- try (optional newline >> reserved ElseKW >> parseCode)
+             ifThenCode <- parseCode
+             ifElseCode <- try (optional newline >> reserved ElseKW >> parseCode)
                       <|> return [] <?> "else block"
-             return $ If cond ifCode elseCode
+             return $ If cond ifThenCode ifElseCode
           <?> "if statement"
 
 parseCode = (many1 newline >> between indent outdent parseBlocks)
@@ -291,14 +289,14 @@ parseProcDecl = do reserved ProcedureKW
 
 parseClassDecl = do reserved ClassKW
                     n <- upperID
-                    inherit <- liftM Just (reserved InheritKW >> upperID)
+                    inherit' <- liftM Just (reserved InheritKW >> upperID)
                             <|> return Nothing <?> "parent class"
-                    subtypes <- (operator LessOp >> commaSep1 upperID)
+                    subtypes' <- (operator LessOp >> commaSep1 upperID)
                             <|> return [] <?> "subtypes"
                     reserved IsKW
                     c <- parseCode
-                    return ClassDecl {className = n, inherit = inherit,
-                                      subtypes = subtypes, classCode = c}
+                    return ClassDecl {className = n, inherit = inherit',
+                                      subtypes = subtypes', classCode = c}
                  <?> "class declaration"
 
 parseParams = parens (commaSep parseParam) <?> "parameters"

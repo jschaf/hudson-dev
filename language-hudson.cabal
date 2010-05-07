@@ -1,0 +1,23 @@
+Name:                language-hudson
+Version:             0.1
+License:             BSD3
+License-File:        LICENSE
+Author:              Joe Schafer <joe@jschaf.com>
+Maintainer:          Joe Schafer <joe@jschaf.com>
+Copyright:           (c) Joe Schafer 2010
+Stability:           Experimental
+Category:            Language, Compilers/Interpreters
+Synopsis:            Hudson Parser
+Description:         A Hudson parser and pretty printer.
+
+
+Cabal-Version:  >= 1.2
+Build-Type:     Simple
+
+Executable hudsonpp
+    Hs-Source-Dirs:      src
+    Main-is:             hudsonpp.hs
+    Ghc-Options:         -Wall
+    Ghc-Prof-Options:     -auto-all
+    -- TODO: fix these with correct constraints
+    Build-Depends:       base, parsec >= 3.1, mtl, containers, pretty > 1

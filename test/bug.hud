@@ -2,6 +2,8 @@ function .nextAnt() is
     if true then 
         tom()
 
-    else 
+    else if true then
         mare()
+    else
+        blah()
         
