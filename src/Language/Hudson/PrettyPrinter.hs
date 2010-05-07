@@ -17,33 +17,50 @@ import Control.Applicative ((<$>))
 -- Space between top level declarations
 
 prettyBlocks :: [Block] -> Doc
-prettyBlocks [] = empty
-prettyBlocks bs = vsep $ map prettyBlock bs
+prettyBlocks bs | null bs   = empty
+                | otherwise = vsep $ map prettyBlock bs
 
-nestBlocks :: [Block] -> Doc
-nestBlocks bs = nestBlocks' 4 bs
+hudsonIndent :: Int
+hudsonIndent = 4
 
-nestBlocks' :: Int -> [Block] -> Doc
-nestBlocks' i bs = vcat . map (nest i . prettyBlock) $ bs
+withCode :: Doc -> [Block] -> Doc
+withCode doc code = doc $$ (vcat $ map (nest hudsonIndent . prettyBlock) code)
+
+keyNameSep :: String              -- ^ keyword
+           -> String              -- ^ name
+           -> Doc                 -- ^ middle part
+           -> String              -- ^ separator
+           -> (Doc -> Doc -> Doc) -- ^ how to combine the name and middle
+           -> Doc
+keyNameSep keyword name middle sep combine =
+    (text keyword <+> text name) `combine` middle <+> text sep
 
 prettyBlock :: Block -> Doc
-prettyBlock (BlockStmt s) = prettyStmt s
-prettyBlock (BlockDecl d) = prettyDecl d
+prettyBlock b = case b of
+                  (BlockStmt s) -> prettyStmt s
+                  (BlockDecl d) -> prettyDecl d
 
 vsep :: [Doc] -> Doc
 vsep = foldl1 ($+$)
 
+
 prettyStmt :: Stmt -> Doc
+prettyStmt s =
+    case s of
+      (Assignment v e) -> prettyExpr v <+> text ":=" <+> prettyExpr e
+      (ProcCall v ps)  -> text v <> (parens . commaDelimit $ map prettyExpr ps)
+      (ObjCall e)      -> prettyExpr e
+      i@(If{})         -> prettyIf i
+      (While cond ws)  -> text "while" <+> prettyExpr cond <+> text "do"
+                          `withCode` ws
+      (Return m)       -> maybe (text "return")
+                                (\v -> text "return" <+> prettyExpr v)
+                                m
+      (Assert e)       -> text "assert" <+> prettyExpr e
+      Null             -> text "null"
 
-prettyStmt (Assignment v e) =
-    prettyExpr v <+> text ":=" <+> prettyExpr e
-
-prettyStmt (ProcCall v ps) =
-    text v <> (parens . sep . punctuate (char ',') . map prettyExpr $ ps)
-
-prettyStmt (ObjCall e) = prettyExpr e
-
-prettyStmt i@(If _ _ []) = prettyIf nestBlocks (const empty) i
+prettyIf (If{}) = text "blaH"
+-- prettyStmt i@(If _ _ []) = prettyIf nestBlocks (const empty) i
 
 -- -- | Handle else-if chain so the if statementes aren't nested each
 -- -- time.
@@ -54,33 +71,23 @@ prettyStmt i@(If _ _ []) = prettyIf nestBlocks (const empty) i
 --         where
 --           f :: [Block] -> Doc
 --           f (BlockStmt b@If{} : bs) = text "else" <+> prettyIf dedent elseNest b $$ prettyBlocks bs
-          
+
 --           dedent :: [Block] -> Doc
 --           dedent = nest (negate . length $ "else ") . nestBlocks
 
 --           elseNest :: [Block] -> Doc
 --           elseNest bs = nest (negate $ length "else ") (text "else") $$ dedent bs
 
+-- prettyStmt i@(If{}) =
+--     prettyIf nestBlocks ((text "else" $$) . nestBlocks) i
 
-prettyStmt i@(If{}) =
-    prettyIf nestBlocks ((text "else" $$) . nestBlocks) i
+-- prettyIf :: ([Block] -> Doc) -> ([Block] -> Doc) -> Stmt -> Doc
+-- prettyIf ifToDoc elseToDoc (If cond ts es) =
+--     text "if" <+> prettyExpr cond <+> text "then" $$ ifToDoc ts $$ elseToDoc es
+-- prettyIf _ _ _ = error "prettyIf can only be called on an if statement"
 
-prettyStmt (While cond ws) =
-    text "while" <+> prettyExpr cond <+> text "do" $$ nestBlocks ws
-
-prettyStmt (Return (Just e)) = text "return" <+> prettyExpr e
-prettyStmt (Return Nothing) = text "return"
-prettyStmt (Assert e) = text "assert" <+> prettyExpr e
-prettyStmt Null = text "null"
-
-prettyIf :: ([Block] -> Doc) -> ([Block] -> Doc) -> Stmt -> Doc
-prettyIf ifToDoc elseToDoc (If cond ts es) =
-    text "if" <+> prettyExpr cond <+> text "then" $$ ifToDoc ts $$ elseToDoc es
-prettyIf _ _ _ = error "prettyIf can only be called on an if statement"    
-
-assign = text ":="
-prettyType Nothing = empty
-prettyType (Just s) = colon <+> text s
+prettyType :: Maybe String -> Doc
+prettyType t = maybe empty (\s -> colon <+> text s) t
 
 commaDelimit = hsep . punctuate (char ',')
 
@@ -92,55 +99,53 @@ prettyParam (Param isRef name ptype) =
       False -> text name <> prettyType ptype
       True -> text "ref" <+> text name <+> prettyType ptype
 
-prettyMaybe = maybe (text "")
+prettyDecl d =
+    case d of
+      (VarDecl name vtype expr)   -> pVar "variable" name vtype expr
+      (ConstDecl name ctype expr) -> pVar "constant" name ctype expr
+      (FuncDecl name params code) -> pMethod "function" name params code
+      (ProcDecl name params code) -> pMethod "procedure" name params code
+      (ClassDecl name parent
+                 implements code) -> pClass name parent implements code
+    where 
+      pVar keyword name vtype expr =
+          let exprDoc = maybe empty (\e -> text ":=" <+> prettyExpr e) expr
+          in keyNameSep keyword name (prettyType vtype) ":=" (<>) <+> exprDoc
+            
+      pMethod method name params code =
+          keyNameSep method name (prettyParams params) "is" (<>) `withCode` code
 
-prettyVar' keyword name type' expr =
-    text keyword <+> text name <> prettyType type'
-             <+> prettyMaybe ((text ":=" <+>) . prettyExpr) expr
+      pClass name parent implements code =
+          keyNameSep "class" name (pInherit parent <+> pSubs implements) "is" (<+>)
+                         `withCode` code
 
-prettyDecl (VarDecl name vtype expr) = prettyVar' "variable" name vtype expr
+      pInherit i = maybe empty (\d -> text "inherit" <+> text d) i
+      pSubs xs | null xs   = empty
+               | otherwise = char '<' <+> commaDelimit (map text xs)
 
-prettyDecl (ConstDecl name ctype expr) = prettyVar' "constant" name ctype expr
-
-
-prettyDecl (FuncDecl name params code) =
-    text "function" <+> text name <> prettyParams params <+> text "is"
-    $$ nestBlocks code
-
-prettyDecl (ProcDecl name params code) =
-    text "procedure" <+> text name <> prettyParams params <+> text "is"
-    $$ nestBlocks code
-
-prettyDecl (ClassDecl name parent implements code) =
-    text "class" <+> text name <+> pInherit parent <+> pSubs implements <+> text "is"
-    $$ nestBlocks code
-    where pInherit Nothing = empty
-          pInherit (Just p) = text "inherit" <+> text p
-          pSubs [] = empty
-          pSubs xs =  char '<' <+> commaDelimit (map text xs)
-
-prettyActuals = parens . commaDelimit . map prettyExpr
+prettyActuals as = parens . commaDelimit $ map prettyExpr as
 
 -- TODO: Doesn't handle precedence rules correctly
-prettyExpr x = case x of
-                 (LiteralInt i)         -> integer i
-                 (LiteralStr s)         -> doubleQuotes $ text s
-                 (LiteralBool True)     -> text "true"
-                 (LiteralBool False)    -> text "false"
-                 (LiteralNull)          -> text "null"
-                 (LiteralThis)          -> text "this"
-                 (ClassLookup c)        -> text c
-                 (Negate e)             -> char '-' <> prettyExpr e
-                 (Not e)                -> text "not" <+> prettyExpr e
-                 (Binary b l r)         -> prettyExpr l <+> prettyBinary b <+> prettyExpr r
-                 (VarLookup s)          -> text s
-                 (FuncCall f as)        -> text f <> prettyActuals as
-                 (ClassCall c as)       -> text c <> prettyActuals as
-                 (ParenExpr e)          -> parens $ prettyExpr e
-                 (ObjFieldExpr n e)     -> prettyExpr e <> text n
-                 (ObjMethodExpr n as e) -> hcat [prettyExpr e, text n, prettyActuals as]
-                 (LambdaExpr ps e)      -> hsep [text "fun", prettyParams ps,
-                                                 text "is", prettyExpr e]
+prettyExpr x =
+    case x of
+      (LiteralInt i)         -> integer i
+      (LiteralStr s)         -> doubleQuotes $ text s
+      (LiteralBool True)     -> text "true"
+      (LiteralBool False)    -> text "false"
+      (LiteralNull)          -> text "null"
+      (LiteralThis)          -> text "this"
+      (ClassLookup c)        -> text c
+      (Negate e)             -> char '-' <> prettyExpr e
+      (Not e)                -> text "not" <+> prettyExpr e
+      (Binary b l r)         -> hsep [prettyExpr l, prettyBinary b, prettyExpr r]
+      (VarLookup s)          -> text s
+      (FuncCall f as)        -> text f <> prettyActuals as
+      (ClassCall c as)       -> text c <> prettyActuals as
+      (ParenExpr e)          -> parens $ prettyExpr e
+      (ObjFieldExpr n e)     -> prettyExpr e <> text n
+      (ObjMethodExpr n as e) -> hcat [prettyExpr e, text n, prettyActuals as]
+      (LambdaExpr ps e)      -> hsep [text "fun", prettyParams ps,
+                                      text "is", prettyExpr e]
 
 prettyBinary b = case b of
                    Add              -> char '+'
@@ -171,7 +176,7 @@ prettifyFile fname = do
 
 printPretty fname = prettifyFile fname >>= either putStrLn putStrLn
 
-roundTripTest :: FilePath -> IO (Bool)  
+roundTripTest :: FilePath -> IO (Bool)
 roundTripTest fname = liftM2 (==) p1 p2
     where
       p1 :: IO (Either String [Block])
@@ -187,17 +192,3 @@ roundTripTest fname = liftM2 (==) p1 p2
               writeFile "p2.hud" (either id id p)
               writeFile "p2.out" (show es)
               return es
-            
-if0 = "if true then k()"
-
-if1 = "if true then\n   k()\nelse\n   j()"
-
-if2 = "if true then\n\
-      \   e()\n\
-      \else if f() then\n\
-      \   j()\n\
-      \   m()\n\
-      \else if l() then\n\
-      \   p()\n\
-      \   r()\n\
-      \else k()"
