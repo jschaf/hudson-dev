@@ -1,4 +1,10 @@
-if false then
-    t()            
-else
+if false then t()
+else if false then
     null
+else if blah() then
+    blah()
+    null
+else
+    print()
+    null
+

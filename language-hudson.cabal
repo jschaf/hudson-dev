@@ -14,6 +14,17 @@ Description:         A Hudson parser and pretty printer.
 Cabal-Version:  >= 1.2
 Build-Type:     Simple
 
+Library
+    Build-Depends:
+        base, parsec >= 3.1, mtl, containers, pretty > 1
+    Ghc-Options: -Wall
+    Hs-Source-Dirs: src
+    Exposed-Modules:
+        Language.Hudson.PrettyPrinter
+        Language.Hudson.Parser
+        Language.Hudson.Scanner
+        
+
 Executable hudsonpp
     Hs-Source-Dirs:      src
     Main-is:             hudsonpp.hs

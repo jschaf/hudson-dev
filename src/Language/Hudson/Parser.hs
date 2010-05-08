@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 
 module Language.Hudson.Parser where
@@ -30,6 +31,7 @@ data Stmt = Assignment Expr Expr
           | Return (Maybe Expr)
           | Assert Expr
           | Null
+          | BlockComment String
             deriving (Eq, Show)
 
 data Decl = VarDecl { varName :: VarID
@@ -182,7 +184,8 @@ parseBlock = liftM BlockStmt parseStmt
 
 parseStmt :: Parser Stmt
 parseStmt = choice [parseAssign, parseObjCall, parseProcCall, parseIf,
-                    parseWhile, parseReturn, parseAssert, parseNull]
+                    parseWhile, parseReturn, parseAssert, parseNull,
+                    parseBlockComment]
         <?> "statement"
 
 parseDecl :: Parser Decl
@@ -250,6 +253,11 @@ parseAssert = do reserved AssertKW
               <?> "assert statement"
 
 parseNull = reserved NullKW >> return Null <?> "null keyword"
+
+
+parseBlockComment = do (CommentTok c, _) <- comment
+                       return $ BlockComment c
+                    <?> "comment"
 
 -- Declarations
 
@@ -422,8 +430,3 @@ parseExprNull = reserved NullKW >> (return $ LiteralNull) <?> "null"
 parseThis = reserved ThisKW >> (return $ LiteralThis) <?> "this"  
 pt p s = parse p "" <$> tokenizeString s
 ts = tokenizeString
-
-
-ifs = "if true then\n\
-      \   e()\n\
-      \else f()"

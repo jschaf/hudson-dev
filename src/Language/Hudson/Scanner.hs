@@ -13,7 +13,8 @@ module Language.Hudson.Scanner
     , Operator(..)
     , Keyword(..)
     , (<:>)
-    ) where
+    ) 
+where
 
 import Control.Monad (msum)
 import Control.Applicative (Applicative, liftA2, (<$>))
@@ -82,8 +83,11 @@ data Separator = AssignSep | ColonSep | CommaSep | LParenSep | RParenSep
 keywordString :: Keyword -> String
 keywordString = map toLower . init . init . show
 
+tokenizeString :: String -> Either ParseError [Token]
 tokenizeString s = tokenizeString' "" s
-tokenizeString' fname s = offside <$> removeUnnecessary <$> parse tokenize fname (prelex s "")
+
+tokenizeString' :: String -> String -> Either ParseError [Token]
+tokenizeString' fname s = offside <$> removeJunk <$> parse tokenize fname (prelex s "")
 
 tokenizeHudsonFile :: String -> IO (Either ParseError [Token])
 tokenizeHudsonFile fname = do
@@ -99,8 +103,8 @@ removeJunk = filter f
 -- | Remove Junk and comment tokens.
 removeUnnecessary = filter f
     where f (JunkTok, _) = False
-          f (CommentTok _, _) = False
-          f (ContCommentTok _, _) = False
+          -- f (CommentTok _, _) = False
+          -- f (ContCommentTok _, _) = False
           f _ = True
 
 -- | Insert Indent and Outdent tokens into the list.  Like foldr, but
@@ -122,10 +126,11 @@ offside zs = off [] zs
       off stk [] = replicate (length stk - 1) (OutdentTok, pos . last $ zs)
 
       off stk (x@(NewlineTok, _):xs)       = x:(off stk xs)
+      -- TODO: Should comments affect indentation (in Python it does)
+      off stk (x@(CommentTok _, _):xs)   = x:(off stk xs)
       -- Tokens that we don't want and don't affect indentation.
       off stk ((JunkTok, _):xs)          = off stk xs
       off stk ((ContCommentTok _, _):xs) = off stk xs
-      off stk ((CommentTok _, _):xs)     = off stk xs
 
       -- We need a start token for indentation that affects
       -- indentation.
@@ -186,7 +191,7 @@ satisfy f = tokenPrim (\cp -> show [(cpChar cp)])
 char c   = satisfy (==c) <?> show [c]
 space    = satisfy (==' ') <?> "space"
 spaces   = many1 space <?> "white space"
--- upper    = satisfy isUpper <?> "uppercase letter"
+-- upper    = satisfy isUpper <?> "uppercase letter"  -- Not currently used
 lower    = satisfy isLower <?> "lowercase letter"
 alpha    = satisfy isAlpha <?> "letter"
 alphaNum = satisfy isAlphaNum <?> "letter or digit"
@@ -199,8 +204,8 @@ string s = do
   tokens (map cpChar) (foldl' updatePos) (prelex' pos s)
 
 tokenize = manyTill p eof
-    where p = choice [newlinetok, spaceJunk, identifier, operator, separator,
-                      integer, stringLiteral, contComment, comment]
+    where p = choice [comment, newlinetok, spaceJunk, identifier, operator, separator,
+                      integer, stringLiteral, contComment]
 
 spaceJunk = spaces >>= (\(x:_) -> return (JunkTok, cpPos x))
 

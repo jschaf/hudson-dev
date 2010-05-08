@@ -67,8 +67,14 @@ main = do
     -- Parse options, getting a list of option actions
     let (actions, nonOptions, errors) = getOpt RequireOrder options args
 
-    -- TODO: handle nonOptions and errors
-                                        
+    case nonOptions of
+      [] -> return ()
+      _  -> putStrLn $ foldl1 (++) nonOptions
+
+    case errors of
+      [] -> return ()
+      _  -> putStrLn $ foldl1 (++) errors
+
     -- Here we thread startOptions through all supplied option actions
     opts <- foldl (>>=) (return startOptions) actions
  
@@ -78,4 +84,7 @@ main = do
  
     when verbose (hPutStrLn stderr "verbose enabled")
  
-    -- input >>= output
+    srcData <- input
+    case prettifyString srcData of -- TODO: Add newline in PrettyPrinter
+      (Left err) -> hPutStrLn stderr err
+      (Right p)  -> return p >>= output    
