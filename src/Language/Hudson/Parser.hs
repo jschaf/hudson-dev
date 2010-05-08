@@ -3,6 +3,7 @@
 
 module Language.Hudson.Parser where
 
+import Language.Hudson.AST
 import Language.Hudson.Scanner
 
 import Control.Monad
@@ -16,101 +17,7 @@ import Text.Parsec.Expr
 import Text.Parsec.Prim
 import Text.Parsec.Pos
 
-data Block = BlockStmt Stmt
-           | BlockDecl Decl
-             deriving (Eq, Show)
-
-type VarID = String
-type ClassID = String
-
-data Stmt = Assignment Expr Expr
-          | ProcCall VarID [Expr]
-          | ObjCall Expr
-          | If {ifCond :: Expr, thenCode :: [Block], elseCode :: [Block]}
-          | While {whileCond :: Expr, whileCode :: [Block]}
-          | Return (Maybe Expr)
-          | Assert Expr
-          | Null
-          | BlockComment String
-            deriving (Eq, Show)
-
-data Decl = VarDecl { varName :: VarID
-                    , varType :: Maybe ClassID
-                    , varExpr :: Maybe Expr
-                    }
-          | ConstDecl { constName :: VarID
-                      , constType :: Maybe ClassID
-                      , constExpr :: Maybe Expr
-                      }
-          | FuncDecl { funcName :: VarID
-                     , funcParams :: [Param]
-                     , funcCode :: [Block]
-                     }
-          | ProcDecl { procName :: VarID
-                     , procParams :: [Param]
-                     , procCode :: [Block]
-                     }
-          | ClassDecl { className :: ClassID
-                      , inherit :: Maybe ClassID
-                      , subtypes :: [ClassID]
-                      , classCode :: [Block]
-                      }
-            deriving (Eq, Show)
-
-data Param = Param { ref :: Bool
-                   , paramName :: VarID
-                   , paramType :: (Maybe ClassID)
-                   }
-             deriving (Eq, Show)
-
-data Expr = LiteralInt Integer
-          | LiteralStr String
-          | LiteralBool Bool
-          | LiteralNull
-          | LiteralThis
-          | ClassLookup ClassID
-          | Negate Expr
-          | Not Expr
-          | Binary BinaryOp Expr Expr
-          | VarLookup VarID
-          | FuncCall VarID [Expr]
-          | ClassCall ClassID [Expr]
-          | ParenExpr Expr
-          | ObjFieldExpr { fieldName :: VarID
-                         , fieldObjExpr :: Expr
-                         }
-          | ObjMethodExpr { methodName :: VarID
-                          , methodActuals :: [Expr]
-                          , methodObjExpr :: Expr
-                          }
-          | LambdaExpr { lambdaParams :: [Param]
-                       , lambdaExpr :: Expr
-                       }
-            deriving (Eq, Show)
-
-data ObjAST = ObjFieldLookup VarID
-            | ObjMethodCall VarID [Expr]
-              deriving (Eq, Show)
-
-data BinaryOp = Add
-              | Sub
-              | Mult
-              | Div
-              | Mod
-              | Equal
-              | NotEqual
-              | LessThan
-              | TypeTest  -- TODO: Should the right be a classID?
-              | LessThanEqual
-              | GreaterThan
-              | GreaterThanEqual
-              | And
-              | Or
-              | Concat
-                deriving (Enum, Eq, Show)
-
 type Parser t = Parsec [Token] () t
-
 
 parseFile fname = do
   ss <- readFile fname
@@ -300,7 +207,7 @@ parseClassDecl = do reserved ClassKW
                     inherit' <- liftM Just (reserved InheritKW >> upperID)
                             <|> return Nothing <?> "parent class"
                     subtypes' <- (operator LessOp >> commaSep1 upperID)
-                            <|> return [] <?> "subtypes"
+                             <|> return [] <?> "subtypes"
                     reserved IsKW
                     c <- parseCode
                     return ClassDecl {className = n, inherit = inherit',

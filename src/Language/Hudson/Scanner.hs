@@ -13,6 +13,7 @@ module Language.Hudson.Scanner
     , Operator(..)
     , Keyword(..)
     , (<:>)
+    , tokStringTest
     ) 
 where
 
@@ -87,7 +88,10 @@ tokenizeString :: String -> Either ParseError [Token]
 tokenizeString s = tokenizeString' "" s
 
 tokenizeString' :: String -> String -> Either ParseError [Token]
-tokenizeString' fname s = offside <$> removeJunk <$> parse tokenize fname (prelex s "")
+tokenizeString' fname s = offside <$> removeUnnecessary
+                      <$> parse tokenize fname (prelex s "")
+
+tokStringTest s = parse tokenize "" (prelex s "")
 
 tokenizeHudsonFile :: String -> IO (Either ParseError [Token])
 tokenizeHudsonFile fname = do
@@ -101,10 +105,13 @@ removeJunk = filter f
           f _ = True
 
 -- | Remove Junk and comment tokens.
+
+-- TODO: Probably remove newline tokens since the tokens include
+-- source information.
 removeUnnecessary = filter f
     where f (JunkTok, _) = False
           -- f (CommentTok _, _) = False
-          -- f (ContCommentTok _, _) = False
+          f (ContCommentTok _, _) = False
           f _ = True
 
 -- | Insert Indent and Outdent tokens into the list.  Like foldr, but
@@ -127,7 +134,7 @@ offside zs = off [] zs
 
       off stk (x@(NewlineTok, _):xs)       = x:(off stk xs)
       -- TODO: Should comments affect indentation (in Python it does)
-      off stk (x@(CommentTok _, _):xs)   = x:(off stk xs)
+      -- off stk (x@(CommentTok _, _):xs)   = x:(off stk xs)
       -- Tokens that we don't want and don't affect indentation.
       off stk ((JunkTok, _):xs)          = off stk xs
       off stk ((ContCommentTok _, _):xs) = off stk xs
@@ -204,8 +211,8 @@ string s = do
   tokens (map cpChar) (foldl' updatePos) (prelex' pos s)
 
 tokenize = manyTill p eof
-    where p = choice [comment, newlinetok, spaceJunk, identifier, operator, separator,
-                      integer, stringLiteral, contComment]
+    where p = choice [contComment, comment, newlinetok, spaceJunk, identifier,
+                      operator, separator, integer, stringLiteral]
 
 spaceJunk = spaces >>= (\(x:_) -> return (JunkTok, cpPos x))
 
@@ -293,7 +300,7 @@ contComment = mkToken' (try (string "##") >> manyTill anyChar newline)
                        (ContCommentTok "")
 
 -- | Tokenize a regular comment.
-comment = mkToken' (char '#' >> manyTill anyChar (lookAhead newline)) -- TODO: eof too?
+comment = mkToken' (char '#' <:> manyTill anyChar (lookAhead newline)) -- TODO: eof too?
                    (CommentTok . toString)
                    (CommentTok "")
 

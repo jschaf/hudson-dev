@@ -218,9 +218,6 @@ class DtPoint inherit DtTuple < DtTuple is
 # The ant making logic
 class DtAntFactory is
 
-    # Where to place the blockers.  This forms a ring around the enemy
-    # queen.
-
     variable blockPoints := dt.list3(DtPoint(1, 37), DtPoint(0, 36), DtPoint(-1, 37))
     variable numAnts := 0
     function .nextAnt() is

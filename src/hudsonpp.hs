@@ -69,11 +69,11 @@ main = do
 
     case nonOptions of
       [] -> return ()
-      _  -> putStrLn $ foldl1 (++) nonOptions
+      _  -> (putStrLn $ concat nonOptions) >> exitFailure
 
     case errors of
       [] -> return ()
-      _  -> putStrLn $ foldl1 (++) errors
+      _  -> (putStrLn $ concat errors) >> exitFailure
 
     -- Here we thread startOptions through all supplied option actions
     opts <- foldl (>>=) (return startOptions) actions

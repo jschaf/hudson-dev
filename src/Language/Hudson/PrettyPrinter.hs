@@ -4,8 +4,8 @@ import Text.PrettyPrint.HughesPJ
 
 import Control.Monad (liftM2)
 
-import Language.Hudson.Parser (parseFile, parseString', parseString, Block(..),
-                               Stmt(..), Decl(..), Param(..), Expr(..), BinaryOp(..))
+import Language.Hudson.AST
+import Language.Hudson.Parser (parseFile, parseString', parseString)
 
 import Control.Applicative ((<$>))
 
@@ -66,7 +66,7 @@ prettyStmt s =
                                 m
       Assert e       -> text "assert" <+> prettyExpr e
       Null           -> text "null"
-      BlockComment c -> char '#' <> text c -- TODO: maybe reflow text?
+      BlockComment c -> text c -- TODO: maybe reflow text?
 
 -- | Handle else-if chain so the if statementes aren't nested each
 -- time.
@@ -76,9 +76,10 @@ prettyIf (If cond ts elses) =
     case elses of
       [] -> ifStart
       -- To place an else-if chain on one line, the else clause may
-      -- only contain one if-statement because that if-statment takes
-      -- over the scope, and there is no clean way to dedent to get
-      -- back to the else-statement's scope.
+      -- only contain one statement, the if-statement. Because the
+      -- if-statment takes over the scope from the else-statement,
+      -- there is no clean way to dedent to get back to the
+      -- else-statement's scope.
       BlockStmt i@If{} : [] -> ifStart $$ (dedent $ text "else" <+> prettyIf i)
       _                     -> ifStart $$ text "else" `withCode` elses
     where
