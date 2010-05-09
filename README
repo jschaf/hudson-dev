@@ -1,1 +1,9 @@
 A parser for the Hudson language using Haskell.
+
+
+Bugs
+
+* An outdented comment in between an if and an else interrupts the
+  parsing (see test/bug7.hud).  If we want to keep the comment, where
+  do we put it?  I'm hesitant to add a comment field in the AST as it
+  would create clutter.

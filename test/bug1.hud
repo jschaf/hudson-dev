@@ -1,10 +1,22 @@
-if false then t()
-else if false then
-    null
-else if blah() then
-    blah()
-    null
-else
-    print()
-    null
+# Test to see that else-if statments are pretty printed properly.
+
+function test() is
+    if a0 then
+        b0()
+    else if a1 then
+        b1()
+    else if a2 then
+        b2()
+        if c0 then
+            d0()
+        else if c1 then
+            d1()
+        else if c2 then
+            d2()
+        else
+            d3()
+        
+    
+    else
+        b3()
 

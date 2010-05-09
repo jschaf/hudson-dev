@@ -10,7 +10,7 @@ import Control.Monad
 import Control.Monad.Identity (Identity)
 import Control.Applicative ((<*>), (<$>))
 
-import Data.List (foldl')
+import Data.List (foldl', intercalate)
 
 import Text.Parsec.Combinator
 import Text.Parsec.Expr
@@ -133,10 +133,17 @@ parseIf = do reserved IfKW
              cond <- parseExpr
              reserved ThenKW
              ifThenCode <- parseCode
+             -- TODO: Add support for newlines inbetween block
+             -- comments
+             cs <- optionMaybe $ many1 parseBlockComment
+             let elseDoc = intercalate "\n" . map commentString <$> cs
              ifElseCode <- try (optional newline >> reserved ElseKW >> parseCode)
                       <|> return [] <?> "else block"
-             return $ If cond ifThenCode ifElseCode
+             return $ If cond ifThenCode ifElseCode elseDoc
           <?> "if statement"
+    where
+      commentString (BlockComment c) = c
+      commentString _ = error "Used commentString on not a comment"
 
 parseCode = (many1 newline >> between indent outdent parseBlocks)
         <|> (parseBlock <:> return [])
@@ -296,7 +303,9 @@ parseClassCall = try (do c <- upperID
                      )
                  <?> "class call"
 
-binaryKW name fun assoc = Infix (do{ reserved name; return $ Binary fun }) assoc
+binaryKW name fun assoc = Infix (do reserved name
+                                    return $ Binary fun)
+                                assoc
 binaryKWLeft name fun = binaryKW name fun AssocLeft
 
 binary name fun assoc = Infix (do{ operator name; return $ Binary fun }) assoc
@@ -318,7 +327,7 @@ parseFuncCall = try (do p <- lowerOrObjID
                     )
                 <?> "function call"
 
-parseVarLookup = (try $ return VarLookup <*> lowerOrObjID)
+parseVarLookup = try (return VarLookup <*> lowerOrObjID)
              <?> "variable or constant lookup"
   
 parseInteger = do (NumberTok n, _) <- numberTag
@@ -331,9 +340,9 @@ parseLiteralString = do (StringTok s, _) <- string
 
 parseParenExpr = return ParenExpr <*> parens parseExpr
 
-parseTrue = reserved TrueKW >> (return $ LiteralBool True) <?> "true"
-parseFalse = reserved FalseKW >> (return $ LiteralBool False) <?> "false"
-parseExprNull = reserved NullKW >> (return $ LiteralNull) <?> "null"
-parseThis = reserved ThisKW >> (return $ LiteralThis) <?> "this"  
+parseTrue = reserved TrueKW >> return (LiteralBool True) <?> "true"
+parseFalse = reserved FalseKW >> return (LiteralBool False) <?> "false"
+parseExprNull = reserved NullKW >> return LiteralNull <?> "null"
+parseThis = reserved ThisKW >> return LiteralThis <?> "this"  
 pt p s = parse p "" <$> tokenizeString s
 ts = tokenizeString

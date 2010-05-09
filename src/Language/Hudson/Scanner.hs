@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 
 module Language.Hudson.Scanner
@@ -132,7 +133,7 @@ offside zs = off [] zs
       -- stack, but it doesn't change indentation.
       off stk [] = replicate (length stk - 1) (OutdentTok, pos . last $ zs)
 
-      off stk (x@(NewlineTok, _):xs)       = x:(off stk xs)
+      off stk (x@(NewlineTok, _):xs)       = x : off stk xs
       -- TODO: Should comments affect indentation (in Python it does)
       -- off stk (x@(CommentTok _, _):xs)   = x:(off stk xs)
       -- Tokens that we don't want and don't affect indentation.
@@ -300,7 +301,7 @@ contComment = mkToken' (try (string "##") >> manyTill anyChar newline)
                        (ContCommentTok "")
 
 -- | Tokenize a regular comment.
-comment = mkToken' (char '#' <:> manyTill anyChar (lookAhead newline)) -- TODO: eof too?
+comment = mkToken' (char '#' <:> manyTill anyChar (lookAhead newline))
                    (CommentTok . toString)
                    (CommentTok "")
 

@@ -234,11 +234,9 @@ class DtAntFactory is
                                                             DtPoint(-3, 1), ## 
                                                             DtPoint(0,20))))
 
-        # So we don't starve
         else if numAnts <= 6 then
             ant := DtGathererAnt().init(DtGatherStrategy())
             
-        # 3 Blockers (2 turn cost each)
         else if numAnts <= 9 then
             # Have the blockers take a roundabout way to avoid
             # attackers.
@@ -248,7 +246,6 @@ class DtAntFactory is
             dtShow(1, blockPoints)
             blockPoints := blockPoints.next
 
-        # Gatherers
         else if numAnts <= 14 then
             ant := DtGathererAnt().init(DtGatherStrategy())
 
@@ -558,7 +555,6 @@ class DtGatherStrategy inherit DtMoveStrategy < DtMoveStrategy is
                     .ant.leaveMessage(message())
                     .ant.pickup()
                     
-            # We're next to a food source or on top of one.
             else if .ant.foodDirection() /= null then
                 dtShow(2, "  Found food point")
                 storeOldFoodPoint()
@@ -566,9 +562,6 @@ class DtGatherStrategy inherit DtMoveStrategy < DtMoveStrategy is
                 .ant.gotoPoint(foodPoint)
 
                 
-            # We don't see any food.  Use pheromones to see if there
-            # is point better than the known food points.  If not,
-            # then go to one of the known points.
             else
                 if foodPheromone() = null then
                     .ant.gotoPoint(foodPoint)

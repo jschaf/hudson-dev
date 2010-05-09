@@ -1,3 +1,5 @@
+# Test continuation comments.
+
 if d(f, ##
      e) then
         null

@@ -11,25 +11,29 @@ import Control.Applicative ((<$>))
 
 -- TODO
 --
+-- Allow withCode to use single line if-stmts, functions, etc.
+--
 -- Write a combinator that automatically adds continuation comments
 -- for parameters.
---
--- Space between top level declarations
 
 prettyBlocks :: [Block] -> Doc
 prettyBlocks bs | null bs   = empty
-                | otherwise = (vsep $ map prettyBlock bs) <> newline
+                | otherwise = vsep (map prettyBlock bs) <> newline
 
 defaultHudsonIndent :: Int
 defaultHudsonIndent = 4
 
 withCode :: Doc -> [Block] -> Doc
-withCode doc code = withCode' defaultHudsonIndent doc code
-
-withCode' :: Int -> Doc -> [Block] -> Doc
-withCode' n doc code
-    | null code = doc
-    | otherwise = doc $+$ (vcat $ map (nest n . prettyBlock) code)
+withCode doc code = case code of
+                      []   -> doc
+                      -- Maybe use one line declarations.  Need to
+                      -- ensure that it is not applied to multiline
+                      -- statements
+                      -- 
+                      -- [_c] -> doc <+> nestedBlocks
+                      _    -> doc $+$ nestedBlocks
+    where
+      nestedBlocks = vcat $ map (nest defaultHudsonIndent . prettyBlock) code
 
 keyNameSep :: String              -- ^ keyword
            -> String              -- ^ name
@@ -71,22 +75,41 @@ prettyStmt s =
 -- | Handle else-if chain so the if statementes aren't nested each
 -- time.
 prettyIf :: Stmt -> Doc         -- TODO: Limit this to if, might need GADTs
-prettyIf (If cond ts elses) =
-    -- TODO: check for single-line ifs
-    case elses of
-      [] -> ifStart
-      -- To place an else-if chain on one line, the else clause may
-      -- only contain one statement, the if-statement. Because the
-      -- if-statment takes over the scope from the else-statement,
-      -- there is no clean way to dedent to get back to the
-      -- else-statement's scope.
-      BlockStmt i@If{} : [] -> ifStart $$ (dedent $ text "else" <+> prettyIf i)
-      _                     -> ifStart $$ text "else" `withCode` elses
+prettyIf (If cond ts elses elseDoc) =
+    ifStart $$ case elses of
+                 [] -> empty
+                 -- To place an else-if chain on one line, the else
+                 -- clause may only contain one statement, the
+                 -- if-statement. This limitation arises because the
+                 -- if-statment takes over the scope from the
+                 -- else-statement and there is no clean way to dedent
+                 -- to get back to the else-statement's scope.
+                 BlockStmt i@If{} : [] -> prettyElseIf i
+                                
+                 _otherwise            -> comment $$ text "else" `withCode` elses
     where
-        dedent = nest (negate $ length "else ")
-        ifStart = (text "if" <+> prettyExpr cond <+> text "then") `withCode` ts
+      ifStart = (text "if" <+> prettyExpr cond <+> text "then") `withCode` ts
+      comment = maybe empty text elseDoc
 prettyIf _ = error "May only use if statement for pretty if."
 
+-- We need a separate function because @nest@, and therefore
+-- @withCode@, will only unnest (given a negative argument) until it
+-- bumps into another doc.  In other words, the most negative value
+-- for nest is the horizontal distance between the current doc and
+-- preceeding doc.
+prettyElseIf :: Stmt -> Doc
+prettyElseIf (If cond ts elses elseDoc) =
+    elseIfStart $$ case elses of
+                     []                    -> empty
+                     BlockStmt i@If{} : [] -> prettyElseIf i
+                     _otherwise            -> comment $$ text "else" `withCode` elses
+    where
+      elseIfStart = (text "else if" <+> prettyExpr cond <+> text "then") `withCode` ts
+      comment = maybe empty text elseDoc
+
+prettyElseIf _ = error "May only if statement for prettyElseIf"
+            
+    
 prettyType :: Maybe String -> Doc
 prettyType t = maybe empty (\s -> colon <+> text s) t
 
@@ -94,7 +117,7 @@ commaDelimit :: [Doc] -> Doc
 commaDelimit = hsep . punctuate (char ',')
 
 prettyParams :: [Param] -> Doc
-prettyParams xs = parens . commaDelimit $ map prettyParam xs
+prettyParams = parens . commaDelimit . map prettyParam
 
 prettyParam :: Param -> Doc
 prettyParam (Param isRef name ptype) =
@@ -107,28 +130,29 @@ prettyDecl d =
     case d of
       VarDecl name vtype expr   -> pVar "variable" name vtype expr
       ConstDecl name ctype expr -> pVar "constant" name ctype expr
-      FuncDecl name params code -> pMethod "function" name params code <> newline
-      ProcDecl name params code -> pMethod "procedure" name params code <> newline
+      FuncDecl name params code -> pMethod "function" name params code
+      ProcDecl name params code -> pMethod "procedure" name params code
       ClassDecl name parent
-                implements code -> pClass name parent implements code <> newline
+                implements code -> pClass name parent implements code
     where 
       pVar keyword name vtype expr =
           let exprDoc = maybe empty (\e -> text ":=" <+> prettyExpr e) expr
           in keyNameSep keyword name (prettyType vtype) "" (<>) <> exprDoc
             
       pMethod method name params code =
-          keyNameSep method name (prettyParams params) "is" (<>) `withCode` code
+          keyNameSep method name (prettyParams params) "is" (<>)
+                         `withCode` code <> newline
 
       pClass name parent implements code =
           keyNameSep "class" name (pInherit parent <+> pSubs implements) "is" (<+>)
-                         `withCode` code
+                         `withCode` code <> newline
 
       pInherit i = maybe empty (\x -> text "inherit" <+> text x) i
       pSubs xs | null xs   = empty
                | otherwise = char '<' <+> commaDelimit (map text xs)
 
 prettyActuals :: [Expr] -> Doc
-prettyActuals as = parens . commaDelimit $ map prettyExpr as
+prettyActuals = parens . commaDelimit . map prettyExpr
 
 -- TODO: Doesn't handle precedence rules correctly
 prettyExpr :: Expr -> Doc
@@ -143,6 +167,7 @@ prettyExpr x =
       ClassLookup c        -> text c
       Negate e             -> char '-' <> prettyExpr e
       Not e                -> text "not" <+> prettyExpr e
+      Binary TypeTest l r  -> prettyExpr l <> char '?' <> prettyExpr r
       Binary b l r         -> hsep [prettyExpr l, prettyBinary b, prettyExpr r]
       VarLookup s          -> text s
       FuncCall f as        -> text f <> prettyActuals as
